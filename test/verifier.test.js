@@ -32,6 +32,15 @@ test('receipts include the verbatim evidence detail', () => {
   assert.match(text, /version/);
 });
 
+test('the verifier can see tail numbers of long command output', () => {
+  const ledger = new EvidenceLedger('v-long');
+  const long = 'line-a\n' + 'x'.repeat(5000) + '\nℹ pass 145\nℹ tests 145';
+  ledger.record('terminal', { command: 'npm test' }, { exit_code: 0, output: long });
+  const text = buildReceipts(ledger);
+  // Root cause of false semantic failures: the pass summary sits at the END.
+  assert.match(text, /pass 145/, 'tail must reach the semantic auditor');
+});
+
 test('verify skips turns with no receipts', async () => {
   const ledger = new EvidenceLedger('v2');
   const result = await verify({ candidate: 'anything', ledger, llmManager: { generate: async () => { throw new Error('must not call'); } } });

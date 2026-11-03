@@ -75,3 +75,20 @@ test('ledger round-trips through toJSON/fromJSON for resume', () => {
   const c = restored.record('terminal', { command: 'echo hi' }, { exit_code: 0, output: 'hi' });
   assert.equal(c.id, 'E3');
 });
+
+test('command receipts keep both head and tail of long output', () => {
+  const ledger = new EvidenceLedger('t-long');
+  const long = 'HEAD-MARKER\n' + 'x'.repeat(5000) + '\nℹ pass 145\nℹ tests 145';
+  const ev = ledger.record('terminal', { command: 'npm test' }, { exit_code: 0, output: long });
+  assert.ok(ev.detail.includes('HEAD-MARKER'), 'head must be kept');
+  assert.ok(ev.detail.includes('pass 145'), 'tail must be kept');
+  assert.match(ev.detail, /chars omitted/);
+});
+
+test('read receipts keep both head and tail of long files', () => {
+  const ledger = new EvidenceLedger('t-longread');
+  const long = 'first-line\n' + 'y'.repeat(1500) + '\nlast-line-visible';
+  const ev = ledger.record('read_file', { path: 'big.txt' }, { content: long, total_lines: 3, lines_read: 3 });
+  assert.ok(ev.detail.includes('first-line'));
+  assert.ok(ev.detail.includes('last-line-visible'));
+});

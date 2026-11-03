@@ -138,6 +138,14 @@ test('aggregated task receipts support child findings without path checks', () =
   assert.equal(r.passed, true, JSON.stringify(r.violations));
 });
 
+test('numbers in the tail of long command output are checkable', () => {
+  const ledger = new EvidenceLedger('t-tail');
+  const long = 'a\n'.repeat(500) + 'ℹ pass 145';
+  ledger.record('terminal', { command: 'npm test' }, { exit_code: 0, output: long });
+  const r = grounding.audit('the suite has 145 passing tests [E1].', ledger);
+  assert.equal(r.passed, true, JSON.stringify(r.violations));
+});
+
 test('quoted strings must be visible in the cited receipt', () => {
   const ledger = new EvidenceLedger('d4');
   const ev = ledger.record('read_file', { path: 'package.json' }, { content: '1 | {"version":"0.1.0"}', total_lines: 1, lines_read: 1 });

@@ -115,23 +115,30 @@ class EvidenceLedger {
   }
 
   /**
-   * Verbatim evidence for the semantic auditor (bounded).
+   * Verbatim evidence for the semantic auditor (bounded, head AND tail kept).
+   * Head-only truncation was a root cause of false semantic failures: test
+   * summaries ("pass 145") sit at the END of long command output.
    */
   detailOf(kind, result) {
     if (!result || typeof result !== 'object') return String(result || '').slice(0, 700);
+    const headTail = (text, head, tail) => {
+      const s = String(text || '');
+      if (s.length <= head + tail + 24) return s;
+      return `${s.slice(0, head)}\n… [${s.length - head - tail} chars omitted] …\n${s.slice(-tail)}`;
+    };
     switch (kind) {
       case 'read':
-        return String(result.content || '').slice(0, 700);
+        return headTail(result.content || '', 1400, 1000);
       case 'command':
-        return String(result.output || result.error || '').slice(0, 700);
+        return headTail(result.output || result.error || '', 1200, 1200);
       case 'write':
         return String(result.message || '').slice(0, 400);
       case 'patch':
-        return String(result.diff_preview || result.message || '').slice(0, 700);
+        return headTail(result.diff_preview || result.message || '', 1000, 500);
       case 'search':
         return JSON.stringify((result.matches || result.results || []).slice(0, 5)).slice(0, 700);
       case 'fetch':
-        return String(result.content || '').slice(0, 700);
+        return headTail(result.content || '', 1000, 600);
       case 'memory':
         return JSON.stringify(result).slice(0, 400);
       default:
