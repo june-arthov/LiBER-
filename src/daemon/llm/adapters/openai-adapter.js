@@ -25,6 +25,45 @@ class OpenAIAdapter extends LLMAdapter {
     return data.choices[0].message.content;
   }
 
+  /**
+   * Native tool calling (OpenAI-compatible). Returns the assistant message fields.
+   */
+  async chat(messages, options = {}) {
+    const body = {
+      model: this.config.model,
+      messages: messages,
+      temperature: options.temperature ?? this.config.temperature ?? 0.7,
+      max_tokens: options.max_tokens || this.config.max_tokens || undefined,
+      stream: false
+    };
+    if (Array.isArray(options.tools) && options.tools.length) {
+      body.tools = options.tools;
+      body.tool_choice = options.tool_choice || 'auto';
+    }
+
+    const response = await fetch(`${this.config.endpoint}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.config.apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.choices) {
+      throw new Error('HTTP ' + response.status + ': ' + (data.error?.message || data.error || response.statusText));
+    }
+
+    this.lastUsage = data.usage || null;
+    const msg = data.choices[0].message || {};
+    return {
+      content: msg.content || '',
+      tool_calls: Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : null,
+      finish_reason: data.choices[0].finish_reason || null
+    };
+  }
+
   async stream(messages, onChunk, options = {}) {
     const response = await fetch(`${this.config.endpoint}/chat/completions`, {
       method: 'POST',

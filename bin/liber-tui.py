@@ -6,6 +6,7 @@ Stack: Textual + Rich Renderables + Async Engine Integration
 """
 
 import sys
+import os
 import json
 import asyncio
 import subprocess
@@ -26,6 +27,17 @@ from textual.binding import Binding
 
 DAEMON_URL = "http://127.0.0.1:4567"
 ROOT_DIR = Path(__file__).resolve().parent.parent
+
+
+def auth_headers() -> Dict[str, str]:
+    """Bearer token written by the daemon at boot (.liber/daemon.token)."""
+    token = os.environ.get("LIBER_TOKEN", "")
+    if not token:
+        try:
+            token = (Path.cwd() / ".liber" / "daemon.token").read_text(encoding="utf-8").strip()
+        except OSError:
+            token = ""
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 # =====================================================================
@@ -316,13 +328,13 @@ class LiberApp(App):
         """Verify daemon status and fetch active agent profile."""
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
-                res = await client.get(f"{DAEMON_URL}/ps")
+                res = await client.get(f"{DAEMON_URL}/ps", headers=auth_headers())
                 if res.status_code == 200:
                     data = res.json()
                     agents = data.get("data", [])
                     if agents:
                         agent = agents[0]
-                        model = agent.get("config", {}).get("engine", {}).get("model", "glm-5.3-flash:cloud")
+                        model = agent.get("model") or agent.get("config", {}).get("engine", {}).get("model", "glm-5.3-flash:cloud")
                         self.header_widget.model_name = model
                         self.log_widget.write(
                             Text.assemble(
@@ -375,7 +387,8 @@ class LiberApp(App):
                 async with client.stream(
                     "POST",
                     f"{DAEMON_URL}/chat/stream",
-                    json={"agentId": "dev-bot", "message": prompt}
+                    json={"agentId": "dev-bot", "message": prompt},
+                    headers=auth_headers()
                 ) as response:
                     if response.status_code != 200:
                         self.log_widget.write(
@@ -496,7 +509,7 @@ class LiberApp(App):
             verdict_str = "approve" if self.hitl_verdict else "deny"
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
-                    await client.post(f"{DAEMON_URL}/hitl/verdict", json={"verdict": verdict_str})
+                    await client.post(f"{DAEMON_URL}/hitl/verdict", json={"verdict": verdict_str}, headers=auth_headers())
             except Exception:
                 pass
 

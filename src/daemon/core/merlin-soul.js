@@ -48,6 +48,10 @@ function buildSystemPrompt(agentConfig, toolDescriptions, options = {}) {
     ? `\n=== EVIDENCE LEDGER (this turn — cite these IDs) ===\n${ledger.digest()}\n`
     : '';
 
+  const nativeBlock = options.nativeTools
+    ? '\nNATIVE TOOL CALLING IS ENABLED: invoke tools through the API. Do NOT print [TOOL: ...] blocks.\n'
+    : '';
+
   const skillBlock = skillContext
     ? `\n=== SKILLS (procedural knowledge — apply silently, do not quote back) ===\n${skillContext}\n`
     : '';
@@ -65,7 +69,7 @@ AGENT SPEC:
 ${ledgerBlock}
 AVAILABLE TOOLS:
 ${toolDescriptions}
-
+${nativeBlock}
 HOW TO INVOKE TOOLS:
 Native tool calling OR formatted text blocks:
 [THOUGHT: rationale for the next step]

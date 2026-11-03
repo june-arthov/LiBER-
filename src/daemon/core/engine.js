@@ -6,6 +6,7 @@ const { buildSystemPrompt } = require('./merlin-soul');
 const { EvidenceLedger } = require('./evidence');
 const grounding = require('./grounding');
 const skills = require('./skills');
+const budget = require('./budget');
 
 const DEFAULT_GROUNDING = {
   enabled: true,
@@ -105,6 +106,19 @@ class MerlinEngine {
       .replace(/<\/?thought>/gi, '');
   }
 
+  /**
+   * Native tool-call arguments arrive as a JSON string (or object on some providers).
+   */
+  parseNativeArgs(raw) {
+    if (raw && typeof raw === 'object') return raw;
+    try {
+      const parsed = JSON.parse(String(raw || '{}'));
+      return parsed && typeof parsed === 'object' ? parsed : { raw: String(raw || '') };
+    } catch {
+      return { raw: String(raw || '') };
+    }
+  }
+
   extractThought(text) {
     const src = String(text);
     const t = src.search(/\[THOUGHT:/i);
@@ -185,6 +199,9 @@ class MerlinEngine {
 
     const summaryContent = middle
       .map(m => {
+        if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+          return `ASSISTANT: [calls ${m.tool_calls.map(t => t.function?.name || 'tool').join(', ')}]`;
+        }
         const text = String(m.content || '');
         if (m.role === 'user' && text.startsWith('OBSERVATION')) return `TOOL: ${text.slice(0, 200)}`;
         if (text.startsWith('GROUNDING AUDIT') || text.startsWith('DUPLICATE CALL')) return `SYSTEM: ${text.slice(0, 160)}`;
@@ -232,6 +249,7 @@ class MerlinEngine {
     const callCounts = new Map();
     const usageTotals = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     let streamedAny = false;
+    let nativeTools = agentConfig.engine?.native_tools === true;
 
     onEvent('start', {
       agentId,
@@ -244,11 +262,22 @@ class MerlinEngine {
     while (iteration < maxLoops) {
       if (circuitBreaker.isBroken(agentId)) break;
 
+      const budgetState = budget.check(agentConfig.limits || {}, agentConfig.engine || {});
+      if (!budgetState.allowed) {
+        finalResponse = `${budgetState.reason} No further model calls were made this turn. Receipts: ${
+          ledger.entries.length ? ledger.entries.map(e => e.id).join(', ') : 'none'
+        }.`;
+        onEvent('budget_blocked', budgetState);
+        logger.error(agentId, 'BUDGET_BLOCKED', budgetState);
+        break;
+      }
+
       messages = this.compressContext(messages, agentConfig.engine?.context_budget || 14000);
 
       const systemContent = buildSystemPrompt(agentConfig, registry.getToolDescription(), {
         ledger,
-        skillContext: skillCtx.text
+        skillContext: skillCtx.text,
+        nativeTools
       });
       if (messages[0] && messages[0].role === 'system') messages[0] = { role: 'system', content: systemContent };
       else messages.unshift({ role: 'system', content: systemContent });
@@ -266,8 +295,21 @@ class MerlinEngine {
 
       const llmStart = Date.now();
       let response = '';
+      let nativeCalls = null;
 
-      if (agentConfig.engine?.stream === true && typeof llmManager.stream === 'function') {
+      if (nativeTools) {
+        try {
+          const nativeRes = await llmManager.generateChat(messages, { tools: registry.getOpenAITools() });
+          response = nativeRes.content || '';
+          nativeCalls = nativeRes.tool_calls || null;
+        } catch (err) {
+          logger.warn(agentId, 'NATIVE_TOOLS_UNAVAILABLE', { error: err.message });
+          onEvent('native_tools_unavailable', { error: err.message });
+          nativeTools = false;
+        }
+      }
+
+      if (!nativeTools && agentConfig.engine?.stream === true && typeof llmManager.stream === 'function') {
         try {
           let started = false;
           await llmManager.stream(messages, (delta) => {
@@ -291,7 +333,7 @@ class MerlinEngine {
         }
       }
 
-      if (!response) {
+      if (!response && !(nativeCalls && nativeCalls.length)) {
         try {
           response = await llmManager.generate(messages);
         } catch (err) {
@@ -305,6 +347,7 @@ class MerlinEngine {
         usageTotals.prompt_tokens += Number(usage.prompt_tokens || 0);
         usageTotals.completion_tokens += Number(usage.completion_tokens || 0);
         usageTotals.total_tokens += Number(usage.total_tokens || 0);
+        budget.record(usage, agentConfig.engine || {});
       }
       onEvent('telemetry', {
         // Measured, not invented: estimated output tokens / real wall time.
@@ -314,17 +357,23 @@ class MerlinEngine {
         completion_tokens: usage?.completion_tokens ?? null
       });
 
-      const reasoning = this.extractReasoning(response);
+      let reasoning = null;
+      if (nativeCalls && nativeCalls.length) {
+        if (response.trim()) reasoning = { content: response.trim(), kind: 'native' };
+      } else {
+        reasoning = this.extractReasoning(response);
+      }
       if (reasoning) {
         trace.push({ type: 'thought', content: reasoning.content, kind: reasoning.kind });
         onEvent('thought', { content: reasoning.content, kind: reasoning.kind });
       }
 
       const explicitFinal = this.extractFinal(response);
-      const toolCalls = explicitFinal === null ? this.parseToolCalls(response) : [];
+      const hasNativeCalls = !!(nativeCalls && nativeCalls.length);
+      const textToolCalls = explicitFinal === null && !hasNativeCalls ? this.parseToolCalls(response) : [];
 
       // ── Candidate answer: audit before delivery ──────────────────────────
-      if (explicitFinal !== null || toolCalls.length === 0) {
+      if (!hasNativeCalls && (explicitFinal !== null || textToolCalls.length === 0)) {
         const candidate = explicitFinal !== null ? explicitFinal : this.cleanAnswer(response);
 
         const verdict = cfg.enabled
@@ -381,8 +430,21 @@ class MerlinEngine {
       }
 
       // ── Tool execution ───────────────────────────────────────────────────
-      memory.add(agentId, 'assistant', response);
-      messages.push({ role: 'assistant', content: response });
+      const toolCalls = hasNativeCalls
+        ? nativeCalls.map(tc => ({
+            name: tc.function?.name,
+            args: this.parseNativeArgs(tc.function?.arguments),
+            id: tc.id || null,
+            native: true
+          }))
+        : textToolCalls;
+
+      memory.add(agentId, 'assistant', response || '[native tool calls]');
+      if (hasNativeCalls) {
+        messages.push({ role: 'assistant', content: response || null, tool_calls: nativeCalls });
+      } else {
+        messages.push({ role: 'assistant', content: response });
+      }
 
       for (const call of toolCalls) {
         const callKey = `${call.name}:${JSON.stringify(call.args)}`;
@@ -405,7 +467,8 @@ class MerlinEngine {
           trace.push({ type: 'loop_guard', tool: call.name, receipt: prior ? prior.id : null });
           onEvent('loop_guard', { tool: call.name, receipt: prior ? prior.id : null, repetitions });
           memory.add(agentId, 'user', nudge);
-          messages.push({ role: 'user', content: nudge });
+          if (call.native && call.id) messages.push({ role: 'tool', tool_call_id: call.id, content: nudge });
+          else messages.push({ role: 'user', content: nudge });
           continue;
         }
 
@@ -457,7 +520,8 @@ class MerlinEngine {
         // Observations are tool results: deliver as user turns, never mid-conversation system
         // messages (several providers drop those silently and re-issue the same call forever).
         memory.add(agentId, 'user', observation);
-        messages.push({ role: 'user', content: observation });
+        if (call.native && call.id) messages.push({ role: 'tool', tool_call_id: call.id, content: outStr });
+        else messages.push({ role: 'user', content: observation });
       }
 
       circuitBreaker.increment(agentId);
@@ -501,6 +565,8 @@ class MerlinEngine {
       grounded: auditResult ? auditResult.passed : null,
       usage: usageReport,
       streamed: streamedAny,
+      native_tools: nativeTools,
+      budget: budget.snapshot(),
       trace,
       durationMs: Date.now() - requestStartTime,
       iterations: iteration,

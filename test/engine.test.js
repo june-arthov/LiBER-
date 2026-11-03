@@ -366,3 +366,76 @@ test('discards a partial stream and completes through generate', async () => {
   assert.equal(res.streamed, false);
   assert.ok(events.some(x => x.e === 'draft_end' && x.d.failed === true));
 });
+
+test('native tool calling executes calls and audits the answer', async () => {
+  let calls = 0;
+  const seenRoles = [];
+  const llm = {
+    async generateChat(messages) {
+      calls++;
+      seenRoles.push(messages.map(m => m.role));
+      if (calls === 1) {
+        return {
+          content: 'Reading the manifest before asserting anything.',
+          tool_calls: [
+            { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"package.json"}' } }
+          ]
+        };
+      }
+      return { content: 'package.json declares version 0.1.0 [E1].', tool_calls: null };
+    },
+    async generate() {
+      throw new Error('text protocol must not be used in native mode');
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const res = await engine.runTurn({
+    agentId: 't-native',
+    agentConfig: { ...cfg(), engine: { model: 'fixture', native_tools: true } },
+    userMessage: 'which version?',
+    memory,
+    llmManager: llm,
+    onEvent: () => {},
+    maxLoops: 5
+  });
+
+  assert.equal(res.native_tools, true);
+  assert.equal(res.grounding.ledger.receipts[0].tool, 'read_file');
+  assert.ok(seenRoles[1].includes('tool'), `expected a tool message, saw ${seenRoles[1].join(',')}`);
+  assert.equal(res.grounding.status, 'PASS', JSON.stringify(res.grounding.violations));
+  assert.ok(res.trace.some(t => t.type === 'thought' && t.kind === 'native'));
+});
+
+test('daily budget stops the turn before another model call', async () => {
+  const budget = require('../src/daemon/core/budget');
+  budget.reset();
+  budget.record({ prompt_tokens: 1000, completion_tokens: 0, total_tokens: 1000 }, {});
+
+  let called = 0;
+  const llm = {
+    async generate() {
+      called++;
+      return '[FINAL: ok]';
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const res = await engine.runTurn({
+    agentId: 't-budget',
+    agentConfig: { ...cfg(), limits: { max_tokens_per_day: 100 } },
+    userMessage: 'hello',
+    memory,
+    llmManager: llm,
+    onEvent: () => {},
+    maxLoops: 3
+  });
+
+  assert.equal(called, 0, 'the model must not be called after the budget is exhausted');
+  assert.match(res.response, /token budget exhausted/i);
+  budget.reset();
+});

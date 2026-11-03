@@ -40,11 +40,25 @@ class LLMManager {
 
   async generate(messages, options = {}) {
     if (!this.activeAdapter) throw new Error("LLM Engine not initialized. Call initialize() first.");
+    return this._withRetry(() => this.activeAdapter.generate(messages, options));
+  }
 
+  /**
+   * Native tool calling: returns { content, tool_calls, finish_reason }.
+   */
+  async generateChat(messages, options = {}) {
+    if (!this.activeAdapter) throw new Error("LLM Engine not initialized. Call initialize() first.");
+    if (typeof this.activeAdapter.chat !== 'function') {
+      throw new Error('Active adapter does not support native tool calling.');
+    }
+    return this._withRetry(() => this.activeAdapter.chat(messages, options));
+  }
+
+  async _withRetry(fn) {
     let lastErr;
     for (let attempt = 1; attempt <= this.retry.attempts; attempt++) {
       try {
-        return await this.activeAdapter.generate(messages, options);
+        return await fn();
       } catch (err) {
         lastErr = err;
         const canRetry = attempt < this.retry.attempts && this.isRetryable(err);

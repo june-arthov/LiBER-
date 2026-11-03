@@ -108,27 +108,36 @@ test('openai stream requests a usage chunk by default', async () => {
   assert.equal(sentBody.stream, true);
 });
 
-test('openai stream can opt out of the usage chunk', async () => {
+test('openai chat sends tools and parses native tool calls', async () => {
   const original = global.fetch;
   let sentBody = null;
   global.fetch = async (url, opts) => {
     sentBody = JSON.parse(opts.body);
     return new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
-          controller.close();
-        }
+      JSON.stringify({
+        choices: [{
+          message: {
+            content: 'checking',
+            tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } }]
+          },
+          finish_reason: 'tool_calls'
+        }],
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }
       }),
-      { status: 200 }
+      { status: 200, headers: { 'content-type': 'application/json' } }
     );
   };
 
+  const adapter = new OpenAIAdapter({ endpoint: 'http://x', apiKey: 'k', model: 'm' });
+  let res;
   try {
-    await new OpenAIAdapter({ endpoint: 'http://x', apiKey: 'k', model: 'm', stream_usage: false }).stream([], () => {});
+    res = await adapter.chat([], { tools: [{ type: 'function', function: { name: 'read_file', parameters: { type: 'object' } } }] });
   } finally {
     global.fetch = original;
   }
 
-  assert.equal(sentBody.stream_options, undefined);
+  assert.equal(sentBody.tool_choice, 'auto');
+  assert.equal(sentBody.tools.length, 1);
+  assert.equal(res.tool_calls[0].function.name, 'read_file');
+  assert.deepEqual(adapter.lastUsage, { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 });
 });

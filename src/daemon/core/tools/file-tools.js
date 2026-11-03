@@ -1,6 +1,7 @@
 // src/daemon/core/tools/file-tools.js — Merlin-Grade File Tools
 const fs = require('fs');
 const path = require('path');
+const policy = require('../policy');
 
 // Resolve path safely relative to working directory
 function resolvePath(filePath) {
@@ -64,6 +65,11 @@ async function readFile({ path: filePath, offset = 1, limit = 100, maxChars = 80
 
 // 2. WRITE FILE (Safe atomic write with parent dir creation)
 async function writeFile({ path: filePath, content = "" }) {
+  const guard = policy.checkWrite(filePath);
+  if (!guard.allowed) {
+    return { error: guard.reason, policy_denied: true, path: filePath };
+  }
+
   const absPath = resolvePath(filePath);
   const dir = path.dirname(absPath);
   
@@ -86,6 +92,11 @@ async function writeFile({ path: filePath, content = "" }) {
 
 // 3. PATCH (Merlin-grade surgical search-and-replace with fuzzy whitespace match & diff)
 async function patchFile({ path: filePath, old_string, new_string, replace_all = false }) {
+  const guard = policy.checkWrite(filePath);
+  if (!guard.allowed) {
+    return { error: guard.reason, policy_denied: true, path: filePath };
+  }
+
   const absPath = resolvePath(filePath);
   if (!fs.existsSync(absPath)) {
     return { error: `File not found: ${filePath}` };

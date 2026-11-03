@@ -14,6 +14,7 @@ agent:
     temperature: 0.2
     max_tokens: 4096
     stream: true           # stream model output as DRAFT (unverified) while the audit runs
+    native_tools: true     # use the provider's tool-calling API; falls back to the text protocol on error
     retry_attempts: 3      # transient provider errors (429/5xx/timeout) are retried with backoff
     retry_base_ms: 700
     # price_in_per_1k: 0.0  # set both to surface a cost_estimate in turn telemetry
@@ -21,6 +22,7 @@ agent:
 
 limits:
   max_cost_per_day: 1.0
+  max_tokens_per_day: 2000000
   circuit_breaker:
     max_loops: 12
     timeout: 30s
@@ -38,6 +40,11 @@ skills:
   enabled: true
   budget_chars: 7000      # index + always-on bodies + auto-selected bodies
   project_dir: ".liber/skills"
+
+# Tool permission policy (file tools only; the shell is not sandboxed)
+policy:
+  write_roots: ["."]            # relative to the daemon's working directory
+  allow_outside_workspace: false # true allows write_file/patch outside write_roots
 
 memory:
   strategy: "sliding-window"

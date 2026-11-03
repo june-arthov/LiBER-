@@ -6,10 +6,17 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const ui = require('../src/cli/ui');
+const auth = require('../src/daemon/core/auth');
 const { C } = ui;
 
 const ROOT = path.resolve(__dirname, '..');
 const PORT = parseInt(process.env.LIBER_PORT || '4567', 10);
+
+// Bearer token written by the daemon at boot (.liber/daemon.token).
+function authHeaders(extra = {}) {
+  const token = auth.readToken();
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+}
 
 const program = new Command();
 program
@@ -26,7 +33,7 @@ function requestDaemon(route, method = 'GET', body = null, timeout = 120000) {
         port: PORT,
         path: route,
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         timeout
       },
       (res) => {
@@ -59,11 +66,20 @@ function requestDaemon(route, method = 'GET', body = null, timeout = 120000) {
 // Health check helper
 async function isDaemonUp() {
   try {
-    const res = await requestDaemon('/ps', 'GET', null, 1500);
-    return res && res.success;
+    const res = await requestDaemon('/healthz', 'GET', null, 1500);
+    return !!(res && (res.ok || res.success));
   } catch {
     return false;
   }
+}
+
+async function waitForDaemonDown(timeoutMs = 6000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isDaemonUp())) return true;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return !(await isDaemonUp());
 }
 
 // Ensure daemon is running, auto-spawning if needed
@@ -108,7 +124,7 @@ function approveHitl() {
       port: PORT,
       path: '/hitl/verdict',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+      headers: authHeaders({ 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) })
     });
     req.on('error', () => {});
     req.write(body);
@@ -129,7 +145,7 @@ function askAgentStream(agentId, message) {
         port: PORT,
         path: '/chat/stream',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+        headers: authHeaders({ 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }),
         timeout: 600000
       },
       (res) => {
@@ -404,7 +420,10 @@ program
   .action(async () => {
     try {
       await requestDaemon('/shutdown');
-      console.log(`${C.green('✔')} Liber Daemon stopped.`);
+      const down = await waitForDaemonDown();
+      console.log(down
+        ? `${C.green('✔')} Liber Daemon stopped.`
+        : `${C.amber('⚠')} Shutdown requested, but port ${PORT} is still answering.`);
     } catch (err) {
       console.log(C.dim('Daemon was not running or has already stopped.'));
     }

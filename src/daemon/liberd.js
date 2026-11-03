@@ -7,6 +7,8 @@ const memory = require('./core/memory');
 const registry = require('./core/registry');
 const circuitBreaker = require('./core/circuit-breaker');
 const trace = require('./core/trace');
+const auth = require('./core/auth');
+const policy = require('./core/policy');
 const logger = require('../utils/logger');
 
 class LiberDaemon {
@@ -79,6 +81,8 @@ class LiberDaemon {
     try {
       const config = ConfigLoader.load(configPath);
       llmManager.initialize(config.agent.engine);
+      policy.configure(config.policy || {});
+      this.token = auth.ensureToken();
 
       this.maxLoops = config.limits?.circuit_breaker?.max_loops || 12;
       if (config.memory?.persist !== false) {
@@ -134,6 +138,21 @@ class LiberDaemon {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const endpoint = url.pathname;
     res.setHeader('Content-Type', 'application/json');
+
+    // Unauthenticated liveness probe only — it exposes no state.
+    if (endpoint === '/healthz') {
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    if (!auth.isAuthorized(req, this.token)) {
+      res.statusCode = 401;
+      res.end(JSON.stringify({
+        success: false,
+        error: 'Unauthorized. Send Authorization: Bearer <token> (token: .liber/daemon.token).'
+      }));
+      return;
+    }
 
     try {
       if (endpoint === '/ps') {
