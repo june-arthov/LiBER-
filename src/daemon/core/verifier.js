@@ -59,8 +59,19 @@ async function verify({ candidate, ledger, llmManager }) {
     { role: 'user', content: `ANSWER:\n${String(candidate).slice(0, 6000)}\n\nRECEIPTS:\n${buildReceipts(ledger)}` }
   ];
 
-  const raw = await llmManager.generate(messages, { temperature: 0, max_tokens: 900 });
-  return parseVerdict(raw);
+  let lastRaw = '';
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    lastRaw = await llmManager.generate(messages, { temperature: 0, max_tokens: 900 });
+    const parsed = parseVerdict(lastRaw);
+    if (!parsed.parse_error) return parsed;
+
+    if (attempt === 1) {
+      messages.push({ role: 'assistant', content: String(lastRaw).slice(0, 800) });
+      messages.push({ role: 'user', content: 'That was not valid JSON. Return ONLY the JSON object, no prose: {"unsupported":[...]}' });
+    }
+  }
+
+  return { unsupported: [], parse_error: true, raw_preview: String(lastRaw).slice(0, 300) };
 }
 
 module.exports = { verify, parseVerdict, buildReceipts, SYSTEM_PROMPT };

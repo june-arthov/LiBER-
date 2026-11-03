@@ -54,3 +54,38 @@ test('verify sends answer + receipts to the model and parses the reply', async (
   assert.match(seen[0].content, /evidence auditor/);
   assert.match(seen[1].content, /E1 \[read_file\]/);
 });
+
+test('verify retries once when the auditor returns prose instead of JSON', async () => {
+  const ledger = new EvidenceLedger('v4');
+  ledger.record('read_file', { path: 'package.json' }, { content: 'version 0.1.0', total_lines: 1, lines_read: 1 });
+
+  let calls = 0;
+  const llmManager = {
+    async generate() {
+      calls++;
+      return calls === 1 ? 'Everything looks supported to me.' : '{"unsupported":[]}';
+    }
+  };
+
+  const result = await verify({ candidate: 'version is 0.1.0 [E1]', ledger, llmManager });
+  assert.equal(calls, 2);
+  assert.equal(result.parse_error, false);
+  assert.deepEqual(result.unsupported, []);
+});
+
+test('verify reports a parse error after both attempts fail', async () => {
+  const ledger = new EvidenceLedger('v5');
+  ledger.record('read_file', { path: 'package.json' }, { content: 'version 0.1.0', total_lines: 1, lines_read: 1 });
+
+  let calls = 0;
+  const llmManager = {
+    async generate() {
+      calls++;
+      return 'still not json';
+    }
+  };
+
+  const result = await verify({ candidate: 'version is 0.1.0 [E1]', ledger, llmManager });
+  assert.equal(calls, 2);
+  assert.equal(result.parse_error, true);
+});
