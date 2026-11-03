@@ -27,19 +27,10 @@ ok "npm install"
 say "Linking 'liber' and 'liberd' commands…"
 if npm link >/dev/null 2>&1; then
   ok "npm link (global commands available)"
-elif [ "$(id -u)" -eq 0 ]; then
-  fail "npm link failed even as root — check the npm log"
 else
-  NPM_PREFIX="${NPM_PREFIX:-$HOME/.local}"
-  mkdir -p "$NPM_PREFIX/bin"
-  if npm config set prefix "$NPM_PREFIX" >/dev/null 2>&1 && npm link >/dev/null 2>&1; then
-    ok "npm link via user prefix ($NPM_PREFIX/bin — add it to your PATH)"
-    say "  echo 'export PATH=\"$NPM_PREFIX/bin:\$PATH\"' >> ~/.bashrc"
-  else
-    say "npm link skipped (needs sudo). Two options:"
-    say "  1. sudo npm link   (recommended)"
-    say "  2. run without linking:  node bin/liber"
-  fi
+  say "npm link skipped (EACCES — needs sudo). Two options:"
+  say "  1. sudo npm link   (recommended)"
+  say "  2. run without linking:  node bin/liber"
 fi
 
 # 4. Python TUI (optional but recommended) — isolated venv so nothing else is touched
