@@ -164,4 +164,32 @@ function sanitizePolicy() {
   }
 }
 
-module.exports = { SCHEMA, validateConfigUpdate, patchYamlKey, patchYamlKeys, sanitizeConfig, sanitizePolicy };
+module.exports = { SCHEMA, validateConfigUpdate, patchYamlKey, patchYamlKeys, sanitizeConfig, sanitizePolicy, defaults };
+
+/** "Reset to defaults": the values this build ships with. */
+const DEFAULTS = {
+  'engine.reasoning_effort': 'auto',
+  'engine.max_tokens': 4096,
+  'engine.temperature': 0.2,
+  'engine.top_p': 1,
+  'engine.context_window_override': 0,
+  'grounding.enabled': true,
+  'grounding.max_repairs': 2,
+  'grounding.require_readback': true,
+  'grounding.require_citations': true,
+  'grounding.semantic_verifier': true,
+  'policy.terminal.mode': 'allowlist',
+  'policy.terminal.allowlist': ['npm test', 'node --test', 'git status', 'git diff', 'git add', 'git commit', 'git push'],
+  'policy.terminal.denylist': [],
+  'policy.write_roots': ['.'],
+  'limits.max_tokens_per_day': 2000000,
+  'limits.max_cost_per_day': 1,
+  'limits.circuit_breaker.max_loops': 12,
+  'memory.window_size': 20,
+  'memory.persist': true,
+  'telemetry.trace': true
+};
+
+function defaults() {
+  return JSON.parse(JSON.stringify(DEFAULTS));
+}

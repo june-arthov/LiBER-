@@ -152,6 +152,48 @@ class LiberDaemon {
     };
   }
 
+  /**
+   * Apply one dotted config path to a live agent config, with the side effects
+   * each subsystem needs. Handles nested keys (limits.circuit_breaker.max_loops).
+   */
+  applyConfigPath(agent, dottedPath, value) {
+    const cfg = agent.config;
+    const [top, ...rest] = dottedPath.split('.');
+    const setDeep = (obj, keys, val) => {
+      let cur = obj;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (typeof cur[keys[i]] !== 'object' || cur[keys[i]] === null) cur[keys[i]] = {};
+        cur = cur[keys[i]];
+      }
+      cur[keys[keys.length - 1]] = val;
+    };
+
+    if (top === 'engine') setDeep(cfg, ['engine', ...rest], value);
+    else if (top === 'grounding') setDeep(cfg, ['grounding', ...rest], value);
+    else if (top === 'limits') {
+      setDeep(cfg, ['limits', ...rest], value);
+      if (rest[0] === 'circuit_breaker' && rest[1] === 'max_loops') this.maxLoops = value;
+    }
+    else if (top === 'memory') {
+      setDeep(cfg, ['memory', ...rest], value);
+      if (rest[0] === 'window_size') memory.resize(value);
+    }
+    else if (top === 'telemetry') {
+      setDeep(cfg, ['telemetry', ...rest], value);
+      if (rest[0] === 'trace') this.traceEnabled = !!value;
+    }
+    else if (top === 'policy') {
+      const pol = policy.current();
+      const terminal = { ...pol.terminal };
+      if (rest[0] === 'terminal') terminal[rest[1]] = value;
+      policy.configure({
+        write_roots: rest[0] === 'write_roots' ? value : pol.write_roots,
+        allow_outside_workspace: pol.allow_outside_workspace,
+        terminal
+      });
+    }
+  }
+
   async handleRequest(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const endpoint = url.pathname;
@@ -387,6 +429,46 @@ class LiberDaemon {
         for (const m of history) memory.add(id, m.role, m.content);
         res.end(JSON.stringify({ success: true, dropped, remaining: memory.get(id).length }));
       }
+      else if (endpoint === '/config/export') {
+        try {
+          const cfgPath = path.resolve(process.cwd(), process.env.LIBER_CONFIG || 'liber.yaml');
+          const raw = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath, 'utf8') : '';
+          const secrets = require('./core/secrets');
+          res.end(JSON.stringify({ success: true, path: cfgPath, yaml: secrets.redact(raw) }));
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+        return;
+      }
+      else if (endpoint === '/config/reset') {
+        const defs = configApply.defaults();
+        const { changes, error } = configApply.validateConfigUpdate(defs);
+        if (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error }));
+          return;
+        }
+        for (const [, agent] of this.agents.entries()) {
+          for (const [p, value] of Object.entries(changes)) {
+            this.applyConfigPath(agent, p, value);
+          }
+          if (Object.keys(changes).some(k => k.startsWith('engine.'))) {
+            const cfg = agent.config;
+            const key = ConfigLoader.resolveApiKey(cfg.engine.provider, cfg.engine.endpoint);
+            if (key) cfg.engine.apiKey = key;
+            llmManager.initialize(cfg.engine);
+          }
+        }
+        this.persistConfigChanges(changes);
+        const firstReset = Array.from(this.agents.values())[0];
+        res.end(JSON.stringify({
+          success: true,
+          reset: Object.keys(changes),
+          applied: configApply.sanitizeConfig(firstReset?.config, this.traceEnabled, process.cwd())
+        }));
+        return;
+      }
       else if (endpoint === '/config') {
         if (req.method === 'GET') {
           const first = Array.from(this.agents.values())[0];
@@ -417,30 +499,11 @@ class LiberDaemon {
 
         const engineTouched = Object.keys(changes).some(k => k.startsWith('engine.'));
         for (const [id, agent] of this.agents.entries()) {
-          const cfg = agent.config;
           for (const [p, value] of Object.entries(changes)) {
-            const [top, ...rest] = p.split('.');
-            if (top === 'engine') {
-              cfg.engine = { ...cfg.engine, [rest[0]]: value };
-            } else if (top === 'grounding') {
-              cfg.grounding = { ...cfg.grounding, [rest[0]]: value };
-            } else if (top === 'limits') {
-              cfg.limits = { ...cfg.limits, [rest[0]]: value };
-            } else if (top === 'memory') {
-              cfg.memory = { ...cfg.memory, [rest[0]]: value };
-              if (rest[0] === 'window_size') memory.resize(value);
-            } else if (top === 'telemetry') {
-              if (rest[0] === 'trace') this.traceEnabled = !!value;
-            } else if (top === 'policy') {
-              const pol = policy.current();
-              policy.configure({
-                write_roots: pol.write_roots,
-                allow_outside_workspace: pol.allow_outside_workspace,
-                terminal: { ...pol.terminal, [rest[1]]: value }
-              });
-            }
+            this.applyConfigPath(agent, p, value);
           }
           if (engineTouched) {
+            const cfg = agent.config;
             const key = ConfigLoader.resolveApiKey(cfg.engine.provider, cfg.engine.endpoint);
             if (key) cfg.engine.apiKey = key;
             llmManager.initialize(cfg.engine);

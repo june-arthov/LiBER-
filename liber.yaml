@@ -61,11 +61,11 @@ skills:
 
 # Tool permission policy (file tools only; the shell is not sandboxed)
 policy:
-  write_roots: ["."]            # relative to the daemon's working directory
+  write_roots: ["."] # relative to the daemon's working directory
   allow_outside_workspace: false # true allows write_file/patch outside write_roots
   terminal:
     mode: "allowlist" # read_only: block state-changing commands · allowlist: only the list · prompt: HITL only
-    allowlist: ["npm test", "node --test", "git add", "git commit", "git push"]
+    allowlist: ["npm test", "node --test", "git status", "git diff", "git add", "git commit", "git push"]
     denylist: []
 
 memory:

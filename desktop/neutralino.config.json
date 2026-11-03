@@ -20,10 +20,10 @@
   "modes": {
     "window": {
       "title": "LiBER",
-      "width": 1180,
-      "height": 780,
-      "minWidth": 860,
-      "minHeight": 560,
+      "width": 1400,
+      "height": 900,
+      "minWidth": 980,
+      "minHeight": 640,
       "center": true,
       "borderless": false,
       "fullScreen": false,
