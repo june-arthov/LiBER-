@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LiBER</title>
+<style>
+  :root {
+    --bg: #0a0b0d;
+    --panel: #111318;
+    --panel2: #16191f;
+    --border: #1e222a;
+    --border-strong: #2a2f3a;
+    --text: #d7dde6;
+    --muted: #7b8494;
+    --dim: #4c5565;
+    --accent: #39c5f0;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --purple: #a78bfa;
+    --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    --sans: "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    display: grid;
+    grid-template-rows: 38px 1fr 64px;
+    grid-template-columns: 224px 1fr;
+    grid-template-areas: "header header" "sidebar main" "footer footer";
+  }
+
+  /* ── Header ─────────────────────────────────────────── */
+  header {
+    grid-area: header;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo { font-weight: 700; letter-spacing: .06em; color: var(--text); }
+  .logo b { color: var(--accent); }
+  .pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    border: 1px solid var(--border-strong); color: var(--muted);
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .pill.online .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .pill.busy .dot { background: var(--accent); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .spacer { flex: 1; }
+
+  /* ── Sidebar ────────────────────────────────────────── */
+  aside {
+    grid-area: sidebar;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow-y: auto; padding: 10px;
+  }
+  .sec { font-size: 10px; letter-spacing: .12em; color: var(--dim); margin: 10px 2px 6px; text-transform: uppercase; }
+  .agent-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 6px; border: 1px solid transparent;
+  }
+  .agent-row:hover { background: var(--panel2); }
+  .agent-row.active { border-color: var(--border-strong); background: var(--panel2); }
+  .agent-row .st { width: 8px; height: 8px; border-radius: 50%; }
+  .agent-row .st.run { background: var(--green); }
+  .agent-row .name { flex: 1; }
+  .agent-row .model { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  select {
+    width: 100%; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: 6px;
+    padding: 6px 8px; font-size: 12px; outline: none;
+  }
+  select:focus { border-color: var(--accent); }
+  .hotkey { display: flex; justify-content: space-between; padding: 3px 2px; color: var(--muted); font-size: 11px; }
+  .hotkey kbd {
+    font-family: var(--mono); background: var(--panel2); border: 1px solid var(--border-strong);
+    border-radius: 4px; padding: 0 5px; font-size: 10px; color: var(--text);
+  }
+
+  /* ── Main chat ──────────────────────────────────────── */
+  main {
+    grid-area: main; overflow-y: auto; padding: 14px 18px 20px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .msg { max-width: 780px; width: 100%; }
+  .msg.operator { align-self: flex-end; max-width: 60%; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10px; letter-spacing: .1em; padding: 2px 8px; border-radius: 4px;
+    margin-bottom: 4px;
+  }
+  .chip.op { background: var(--accent); color: #04222c; font-weight: 700; }
+  .chip.op.dim { background: var(--panel2); color: var(--muted); }
+  .op-text {
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; color: var(--text); white-space: pre-wrap;
+  }
+  details.reason, details.obs {
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); overflow: hidden;
+  }
+  details.reason summary, details.obs summary {
+    cursor: pointer; padding: 5px 9px; color: var(--muted);
+    font-size: 11px; user-select: none; list-style: none;
+    display: flex; align-items: center; gap: 7px;
+  }
+  details.reason summary::before { content: "🧠"; font-size: 10px; }
+  details.obs summary::before { content: "⚡"; font-size: 10px; }
+  details summary .rec {
+    font-family: var(--mono); color: var(--accent); font-size: 11px;
+  }
+  details summary .ok { color: var(--green); }
+  details summary .bad { color: var(--red); }
+  details.reason pre, details.obs pre {
+    margin: 0; padding: 8px 10px; border-top: 1px solid var(--border);
+    background: #0d0f13; white-space: pre-wrap; word-break: break-word;
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    max-height: 260px; overflow-y: auto;
+  }
+  .answer {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .answer code {
+    font-family: var(--mono); font-size: 12px;
+    background: #1a1e26; border-radius: 4px; padding: 1px 5px; color: #9ecbff;
+  }
+  .answer pre {
+    background: #0d0f13; border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; overflow-x: auto; margin: 8px 0;
+  }
+  .answer pre code { background: none; padding: 0; color: var(--text); }
+  .answer .cite {
+    color: var(--accent); font-family: var(--mono); font-size: 11px;
+    background: #0e2830; border-radius: 4px; padding: 0 4px; cursor: pointer;
+  }
+  .audit {
+    border: 1px solid var(--amber); border-left: 3px solid var(--amber);
+    background: #17120a; border-radius: 6px; padding: 8px 10px;
+    color: var(--amber); font-size: 12px; white-space: pre-wrap;
+  }
+  .audit.ok { border-color: var(--green); border-left: 3px solid var(--green); background: #0a1710; color: var(--green); }
+  .sysline { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  .empty {
+    align-self: center; text-align: center; color: var(--dim); margin-top: 22vh;
+  }
+  .empty .big { font-size: 22px; letter-spacing: .1em; color: var(--muted); }
+  .empty .small { margin-top: 6px; font-size: 12px; }
+
+  /* ── Footer input ───────────────────────────────────── */
+  footer {
+    grid-area: footer; background: var(--panel); border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 8px 14px 6px;
+  }
+  .input-row { display: flex; gap: 8px; align-items: flex-end; }
+  textarea {
+    flex: 1; resize: none; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    padding: 8px 10px; font-family: var(--sans); font-size: 13px;
+    height: 36px; outline: none; max-height: 120px;
+  }
+  textarea:focus { border-color: var(--accent); }
+  button.send {
+    background: var(--accent); color: #04222c; border: none; border-radius: 8px;
+    font-weight: 700; padding: 9px 16px; cursor: pointer; height: 36px;
+  }
+  button.send:disabled { background: var(--panel2); color: var(--dim); cursor: not-allowed; }
+  .hintbar { display: flex; gap: 14px; margin-top: 5px; color: var(--dim); font-size: 10px; }
+  .hintbar b { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">Li<b>BER</b></span>
+  <span class="pill" id="pill-state"><span class="dot"></span><span id="state-text">CONNECTING</span></span>
+  <span class="pill" id="pill-model"><span class="dot"></span><span id="model-text">—</span></span>
+  <span class="spacer"></span>
+  <span class="pill" id="pill-daemon" title="Daemon gateway"></span>
+</header>
+
+<aside>
+  <div class="sec">Agents</div>
+  <div id="agent-list"><div class="sysline">loading…</div></div>
+  <div class="sec">Model</div>
+  <select id="model-select" title="Switch the active AI model"></select>
+  <div class="sec">Grounding</div>
+  <div class="sysline" id="grounding-info" style="padding:2px;">gate: —</div>
+  <div class="sysline" id="token-debug" style="padding:2px;">token: …</div>
+  <div class="sec">Hotkeys</div>
+  <div class="hotkey"><span>Send</span><kbd>Enter</kbd></div>
+  <div class="hotkey"><span>New line</span><kbd>Shift+Enter</kbd></div>
+  <div class="hotkey"><span>Switch model</span><kbd>Ctrl+M</kbd></div>
+  <div class="hotkey"><span>Clear stream</span><kbd>Ctrl+L</kbd></div>
+</aside>
+
+<main id="stream">
+  <div class="empty" id="empty-state">
+    <div class="big">LiBER DESKTOP</div>
+    <div class="small">Original harness shell — machine-enforced grounding, no invented facts.<br>Type below to start a turn.</div>
+  </div>
+</main>
+
+<footer>
+  <div class="input-row">
+    <textarea id="prompt" placeholder="Type instructions for the agent…" rows="1"></textarea>
+    <button class="send" id="send-btn">Send</button>
+  </div>
+  <div class="hintbar">
+    <span><b>Enter</b> send</span><span><b>Ctrl+M</b> model</span><span><b>Ctrl+L</b> clear</span>
+    <span id="foot-status" style="margin-left:auto;"></span>
+  </div>
+</footer>
+
+<script src="/assets/neutralino.js"></script>
+<script>
+const DAEMON = 'http://127.0.0.1:4567';
+const CATALOG = [
+  { label: 'Ollama Cloud · glm-5.3-flash',        model: 'glm-5.3-flash',              provider: 'openai',    endpoint: 'https://ollama.com/v1' },
+  { label: 'Ollama Cloud · kimi-k2.7-code',       model: 'kimi-k2.7-code',             provider: 'openai',    endpoint: 'https://ollama.com/v1' },
+  { label: 'OpenAI · gpt-4.1-mini',               model: 'gpt-4.1-mini',                provider: 'openai',    endpoint: 'https://api.openai.com/v1' },
+  { label: 'Groq · llama-3.3-70b-versatile',      model: 'llama-3.3-70b-versatile',     provider: 'openai',    endpoint: 'https://api.groq.com/openai/v1' },
+  { label: 'Mistral · mistral-large-latest',      model: 'mistral-large-latest',        provider: 'openai',    endpoint: 'https://api.mistral.ai/v1' },
+  { label: 'DeepSeek · deepseek-chat',            model: 'deepseek-chat',               provider: 'openai',    endpoint: 'https://api.deepseek.com/v1' },
+  { label: 'Anthropic · claude-sonnet-4-5',       model: 'claude-sonnet-4-5',           provider: 'anthropic', endpoint: 'https://api.anthropic.com' },
+  { label: 'Google · gemini-2.5-pro',             model: 'gemini-2.5-pro',              provider: 'gemini',    endpoint: 'https://generativelanguage.googleapis.com' },
+  { label: 'Ollama local · llama3.2',             model: 'llama3.2',                    provider: 'ollama',    endpoint: 'http://localhost:11434' }
+];
+
+let token = '';
+let busy = false;
+let currentModel = null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function loadToken() {
+  let dbg_last = '';
+  const dbg = (s) => { dbg_last = s; const el = $('token-debug'); if (el) el.textContent = s; };
+
+  // The daemon reports where its token file lives (path only, never the token).
+  let tokenPath = null;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 2500);
+    const res = await fetch(DAEMON + '/whoami', { signal: ctrl.signal });
+    clearTimeout(t);
+    if (res.ok) {
+      const info = await res.json();
+      tokenPath = info.token_path || null;
+      dbg('daemon: ' + (info.cwd || '?'));
+    }
+  } catch { /* daemon down */ }
+
+  if (window.Neutralino) {
+    try {
+      Neutralino.init();
+      await Promise.race([
+        new Promise((res) => {
+          if (Neutralino.events && typeof Neutralino.events.on === 'function') Neutralino.events.on('ready', res);
+          else res();
+        }),
+        new Promise((res) => setTimeout(res, 4000))
+      ]);
+
+      // LIBER_TOKEN env wins when the operator sets it explicitly.
+      try {
+        const envTok = String(await Neutralino.os.getEnv('LIBER_TOKEN') || '').trim();
+        if (envTok) { token = envTok; dbg('token from LIBER_TOKEN env'); return; }
+      } catch { /* next */ }
+
+      if (tokenPath) {
+        try {
+          const raw = await Neutralino.filesystem.readFile(tokenPath);
+          token = String(raw).trim();
+          if (token) { dbg('token ok (' + token.length + ' chars)'); return; }
+        } catch (err) {
+          dbg('read ' + tokenPath + ' → ' + String(err && (err.message || err.code || err)).slice(0, 60));
+        }
+      }
+    } catch (err) {
+      dbg('NL failed: ' + String(err && err.message || err).slice(0, 60));
+    }
+  }
+
+  if (!token) dbg(dbg_last || 'token: empty');
+}
+
+function authHeaders(extra = {}) {
+  return token ? { ...extra, 'Authorization': 'Bearer ' + token } : extra;
+}
+
+async function api(route, method = 'GET', body = null) {
+  const res = await fetch(DAEMON + route, {
+    method,
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
+
+function markdownLite(text) {
+  let out = esc(text);
+  // code fences
+  out = out.replace(/```([\s\S]*?)```/g, (_, code) => `<pre><code>${code.trim()}</code></pre>`);
+  // inline code
+  out = out.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  // bold
+  out = out.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+  // receipts
+  out = out.replace(/\[E(\d+)\]/g, '<span class="cite" onclick="scrollToReceipt(\'E$1\')">[E$1]</span>');
+  return out;
+}
+
+function addEl(parent, tag, cls, html) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (html !== undefined) el.innerHTML = html;
+  parent.appendChild(el);
+  return el;
+}
+
+let currentTurn = null;
+let currentAnswer = null;
+
+function startTurn() {
+  const stream = $('stream');
+  if ($('empty-state')) $('empty-state').remove();
+  currentTurn = addEl(stream, 'div', 'msg');
+  currentAnswer = null;
+}
+
+function operatorMessage(text) {
+  const stream = $('stream');
+  if ($('empty-state')) $('empty-state').remove();
+  const wrap = addEl(stream, 'div', 'msg operator');
+  addEl(wrap, 'div', 'chip op', 'OPERATOR');
+  addEl(wrap, 'div', 'op-text', esc(text));
+}
+
+function eventBlock(kind, label, body) {
+  const wrap = addEl(currentTurn, 'details', kind);
+  const sum = addEl(wrap, 'summary', '', label);
+  addEl(wrap, 'pre', '', body);
+  return wrap;
+}
+
+function ensureAnswer() {
+  if (currentAnswer && currentAnswer.isConnected) return currentAnswer;
+  currentAnswer = addEl(currentTurn, 'div', 'answer', '');
+  return currentAnswer;
+}
+
+function appendAnswer(text) {
+  ensureAnswer();
+  currentAnswer.textContent += text;
+  $('stream').scrollTop = $('stream').scrollHeight;
+}
+
+function renderAudit(payload) {
+  const status = payload.status || '?';
+  const ok = status === 'PASS';
+  const v = payload.violations || [];
+  const rec = (payload.ledger?.receipts || []).length;
+  const el = addEl(currentTurn, 'div', 'audit' + (ok ? ' ok' : ''),
+    ok
+      ? `✔ GROUNDING PASS · ${rec} receipt${rec === 1 ? '' : 's'} · ${payload.claims_checked} claim${payload.claims_checked === 1 ? '' : 's'} checked`
+      : `⚠ GROUNDING AUDIT — ${v.length} unverified claim${v.length === 1 ? '' : 's'}\n` +
+        v.slice(0, 5).map(x => `  • [${x.code}] ${x.text}`).join('\n') +
+        `\nReceipts this turn: ${(payload.ledger?.receipts || []).map(r => r.id).join(', ') || 'none'}.`);
+}
+
+function scrollToReceipt(id) { /* v1: citations are rendered inline; receipt detail lives in observation blocks */ }
+
+async function handleSSE(message) {
+  startTurn();
+  busy = true;
+  setState('busy', 'EXECUTING');
+  $('send-btn').disabled = true;
+
+  const controller = new AbortController();
+  try {
+    const res = await fetch(DAEMON + '/chat/stream', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ agentId: 'dev-bot', message }),
+      signal: controller.signal
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', evName = '';
+
+    const handle = (name, raw) => {
+      let payload = {};
+      try { payload = JSON.parse(raw); } catch { payload = { content: raw }; }
+      switch (name) {
+        case 'thought':
+          eventBlock('reason', `REASONING ${payload.kind ? '· ' + payload.kind : ''}`, payload.content || '');
+          break;
+        case 'tool_dispatch':
+          eventBlock('obs', `TOOL ${payload.tool}`, payload.command ? 'cmd: ' + payload.command : '');
+          break;
+        case 'observation': {
+          const ok = payload.ok;
+          eventBlock('obs',
+            `<span class="rec">[${payload.evidence}]</span> <span class="${ok ? 'ok' : 'bad'}">${payload.tool} ${ok ? 'OK' : 'FAILED'}${payload.exit_code !== undefined && payload.exit_code !== 0 ? ' (exit ' + payload.exit_code + ')' : ''}</span>`,
+            payload.output || '');
+          break;
+        }
+        case 'loop_guard':
+          eventBlock('obs', `LOOP GUARD · ${payload.tool}`, 'Duplicate or empty action suppressed — the engine is forcing progress.');
+          break;
+        case 'grounding_audit':
+          eventBlock('obs', `GROUNDING REPAIR ${payload.attempt}/${payload.max_repairs}`, 'Blocked unverified claims are being corrected.');
+          break;
+        case 'draft':
+          appendAnswer(payload.delta || '');
+          break;
+        case 'grounding_warning':
+          renderAudit(payload);
+          break;
+        case 'grounding_pass':
+          renderAudit({ status: 'PASS', claims_checked: payload.claims_checked, ledger: { receipts: [] } });
+          break;
+        case 'final':
+          if (payload.response) {
+            if (currentAnswer && currentAnswer.textContent.length) {
+              currentAnswer.textContent = payload.response;
+            } else {
+              const ans = ensureAnswer();
+              ans.textContent = '';
+              ans.innerHTML = markdownLite(payload.response);
+              currentAnswer = null;
+            }
+            if (payload.grounding && payload.grounding.status) renderAudit(payload.grounding);
+          }
+          break;
+        case 'error':
+          eventBlock('obs', 'ERROR', payload.error || '');
+          break;
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          if (line.startsWith('event:')) { evName = line.slice(6).trim(); }
+          else if (line.startsWith('data:')) handle(evName, line.slice(5).trim());
+        }
+      }
+    }
+  } catch (err) {
+    if (currentTurn) eventBlock('obs', 'ERROR', String(err.message || err));
+  } finally {
+    busy = false;
+    setState('online', 'IDLE');
+    $('send-btn').disabled = false;
+    $('foot-status').textContent = '';
+    $('stream').scrollTop = $('stream').scrollHeight;
+  }
+}
+
+function setState(cls, text) {
+  const pill = $('pill-state');
+  pill.className = 'pill ' + cls;
+  $('state-text').textContent = text;
+}
+
+async function refreshFleet() {
+  const { data } = await api('/ps');
+  const list = $('agent-list');
+  list.innerHTML = '';
+  const agents = data?.data || [];
+  if (!agents.length) { list.innerHTML = '<div class="sysline">no agents</div>'; return; }
+  for (const a of agents) {
+    const row = addEl(list, 'div', 'agent-row' + (a.id === 'dev-bot' ? ' active' : ''));
+    addEl(row, 'div', 'st ' + (a.status === 'RUNNING' ? 'run' : ''));
+    addEl(row, 'div', 'name', esc(a.id));
+    addEl(row, 'div', 'model', esc(a.model || ''));
+  }
+  const gate = agents[0]?.grounding !== false;
+  $('grounding-info').textContent = 'gate: ' + (gate ? 'enforced' : 'disabled');
+  const m = agents[0]?.model || null;
+  if (m && m !== currentModel) {
+    currentModel = m;
+    $('model-text').textContent = m;
+    $('pill-model').classList.add('online');
+  }
+}
+
+function fillCatalog() {
+  const sel = $('model-select');
+  for (const c of CATALOG) {
+    const opt = document.createElement('option');
+    opt.value = c.model;
+    opt.textContent = c.label;
+    sel.appendChild(opt);
+  }
+}
+
+async function switchModel(model) {
+  const preset = CATALOG.find(c => c.model === model);
+  if (!preset) return;
+  $('foot-status').textContent = 'switching model…';
+  const { status, data } = await api('/model/switch', 'POST', {
+    model: preset.model, provider: preset.provider, endpoint: preset.endpoint
+  });
+  if (status === 200 && data.success) {
+    currentModel = data.active?.model || preset.model;
+    $('model-text').textContent = currentModel;
+    $('foot-status').textContent = 'model: ' + currentModel + ' (' + (data.active?.provider || '') + ')';
+  } else {
+    $('foot-status').textContent = 'switch failed: ' + (data.error || status);
+  }
+}
+
+$('send-btn').addEventListener('click', send);
+$('prompt').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key.toLowerCase() === 'm') { e.preventDefault(); $('model-select').focus(); }
+  if (e.ctrlKey && e.key.toLowerCase() === 'l') {
+    e.preventDefault();
+    $('stream').innerHTML = '<div class="empty" id="empty-state"><div class="big">LiBER DESKTOP</div><div class="small">Stream cleared.</div></div>';
+  }
+});
+$('model-select').addEventListener('change', (e) => switchModel(e.target.value));
+
+function send() {
+  const text = $('prompt').value.trim();
+  if (!text || busy) return;
+  $('prompt').value = '';
+  operatorMessage(text);
+  handleSSE(text);
+}
+
+(async function boot() {
+  fillCatalog();
+  await loadToken();
+  try {
+    const { status, data } = await api('/healthz');
+    $('pill-daemon').textContent = status === 200 ? 'daemon: 127.0.0.1:4567' : 'daemon: unreachable';
+    if (status === 200) $('pill-daemon').classList.add('online');
+    setState('online', 'IDLE');
+  } catch {
+    $('pill-daemon').textContent = 'daemon: unreachable';
+    setState('offline', 'OFFLINE');
+  }
+  refreshFleet().catch(() => {});
+  setInterval(refreshFleet, 15000);
+})();
+</script>
+</body>
+</html>

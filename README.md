@@ -115,6 +115,7 @@ liber skills      # List procedural skills (liber skills <name> to print one)
 liber resume      # Continue an interrupted turn from .liber/turns/
 liber reset       # Clear the persisted conversation window
 liber bench       # Run the 8-case model-compliance benchmark (grounded, honesty, tools)
+liber desktop     # Launch the LiBER desktop shell (LiBER.exe — OpenCode-style UI)
 liber stop        # Gracefully shutdown daemon
 ```
 
@@ -178,6 +179,30 @@ Details:
   falls back to the text protocol automatically.
 - **Streaming** works on all adapters; a failed stream always falls back to a full,
   audited completion.
+
+## 🖥️ Desktop Shell (LiBER.exe)
+
+An original Neutralino/WebView2 shell (~3 MB, no Electron) with an OpenCode-style
+interface: left sidebar shows the real agent fleet and a live model picker
+(`/model/switch`), the main pane streams the turn over SSE (reasoning, tool
+receipts, grounding audit, cited answers), and the input bar is keyboard-first
+(Enter send, Ctrl+M model, Ctrl+L clear).
+
+Build once:
+
+```bash
+cd desktop
+npm i -D @neutralinojs/neu
+npx neu update
+npx neu build
+```
+
+The binary lands at `desktop/dist/liber-desktop/LiBER.exe` — double-click it or
+run `liber desktop`. It talks to the local daemon (`127.0.0.1:4567`): the daemon's
+unauthenticated `GET /whoami` reports only the token **file path** (never the
+token), the shell reads the file through the Neutralino filesystem API, and all
+stateful calls keep the bearer token. The daemon also gained CORS headers and an
+OPTIONS handler so local shells can call it without weakening auth.
 
 ## 📚 Skill Library
 

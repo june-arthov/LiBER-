@@ -6,6 +6,11 @@ const liberd = require('../src/daemon/liberd');
 process.on('SIGINT', () => liberd.stop());
 process.on('SIGTERM', () => liberd.stop());
 
+// Safety net: a bug in one request must never kill the daemon silently.
+process.on('uncaughtException', (err) => {
+  console.error(`[liberd] uncaughtException (daemon stays up): ${err && err.message}`);
+});
+
 liberd.start().catch(err => {
   console.error(`[FATAL] Daemon crashed: ${err.message}`);
   process.exit(1);

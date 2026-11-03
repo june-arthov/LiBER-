@@ -24,3 +24,10 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Desktop shell build artifacts (rebuild with: cd desktop && npx neu build)
+desktop/node_modules/
+desktop/dist/
+desktop/.tmp/
+desktop/package-lock.json
+desktop/bin/
+

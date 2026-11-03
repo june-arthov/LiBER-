@@ -650,6 +650,23 @@ program
     }
   });
 
+// COMMAND: desktop
+program
+  .command('desktop')
+  .description('Launch the LiBER desktop shell (build first: cd desktop && npx neu build)')
+  .action(() => {
+    const exe = path.join(ROOT, 'desktop', 'dist', 'liber-desktop', 'LiBER.exe');
+    if (!fs.existsSync(exe)) {
+      console.error(`${C.red('✖ LiBER.exe not built yet.')}`);
+      console.error(C.dim('  Build it once:  cd desktop && npm i -D @neutralinojs/neu && npx neu update && npx neu build'));
+      console.error(C.dim(`  Then run this again — the binary will be at ${exe}`));
+      process.exit(1);
+    }
+    const { spawn } = require('child_process');
+    spawn(exe, [], { cwd: path.dirname(exe), detached: true, stdio: 'ignore', windowsHide: false }).unref();
+    console.log(`${C.green('✔')} LiBER desktop shell launched.`);
+  });
+
 // COMMAND: tui
 program
   .command('tui')

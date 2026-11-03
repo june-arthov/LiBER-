@@ -147,9 +147,35 @@ class LiberDaemon {
     const endpoint = url.pathname;
     res.setHeader('Content-Type', 'application/json');
 
+    // CORS for the desktop shell (Neutralino/WebView2 origin) and any local client.
+    // The daemon binds to loopback and every stateful endpoint still requires the
+    // bearer token, so a wildcard origin does not weaken access control.
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
     // Unauthenticated liveness probe only — it exposes no state.
     if (endpoint === '/healthz') {
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    // Unauthenticated bootstrap info for local shells: the daemon's cwd and where
+    // its token FILE lives (the path only — the token itself is never served).
+    if (endpoint === '/whoami') {
+      let version = '0.0.0';
+      try { version = require('../../package.json').version || version; } catch { /* best effort */ }
+      res.end(JSON.stringify({
+        app: 'liber',
+        version,
+        cwd: process.cwd(),
+        token_path: path.join(process.cwd(), '.liber', 'daemon.token')
+      }));
       return;
     }
 
