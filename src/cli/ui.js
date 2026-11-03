@@ -32,48 +32,53 @@ const C = {
   badgeDark: (s) => (noColor ? `[${s}]` : `\x1b[48;2;30;41;59m\x1b[38;2;148;163;184m\x1b[1m ${s} \x1b[0m`),
 };
 
+// Strip ANSI escape sequences to compute true visual string width
+function stripAnsi(str) {
+  return String(str).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
 // Window width helper
 function getCols() {
   return Math.min(process.stdout.columns || 80, 100);
 }
 
+// Format a single box row with pixel-perfect right border alignment
+function formatBoxRow(content, innerWidth) {
+  const visibleLen = stripAnsi(content).length;
+  const pad = Math.max(0, innerWidth - visibleLen);
+  return '  ' + C.darkDim('│') + ' ' + content + ' '.repeat(pad) + ' ' + C.darkDim('│');
+}
+
 // Modern Agy Terminal Header Banner
 function printAgyBanner(info = {}) {
-  const width = Math.max(getCols(), 70);
-  const bar = '─'.repeat(width - 4);
+  const width = Math.max(getCols(), 76);
+  const innerWidth = width - 2;
   const agent = info.agent || 'dev-bot';
   const model = info.model || 'glm-5.3-flash:cloud';
   const port = info.port || 4567;
   const status = info.online ? C.green('● Online') : C.amber('○ Offline');
   const cwd = process.cwd();
+  const displayCwd = cwd.length > (innerWidth - 8) ? '...' + cwd.slice(-(innerWidth - 11)) : cwd;
+
+  const titleBar = C.cyan(C.bold(' LIBER 2.0 '));
+  const titleLen = stripAnsi(titleBar).length;
+  const topBar = C.darkDim('  ╭─') + titleBar + C.darkDim('─'.repeat(Math.max(0, innerWidth - titleLen)) + '─╮');
+  const bottomBar = C.darkDim('  ╰─') + C.darkDim('─'.repeat(innerWidth) + '─╯');
+
+  const row1 = C.cyan(C.bold('▲ AGY TERMINAL')) + C.dim('  Autonomous AI Agent Orchestrator') + ' '.repeat(Math.max(0, innerWidth - 56)) + C.purple('v0.2.0');
+  const row2 = C.dim('Agent: ') + C.bold(C.sky(agent)) + '  ' + C.dim('Model: ') + C.amber(model) + '  ' + C.dim('Daemon: ') + C.dim(`:${port}`) + ' [' + status + ']';
+  const row3 = C.dim('Dir: ') + C.dim(displayCwd);
 
   console.log();
-  console.log(C.darkDim('  ╭─') + C.cyan(C.bold(' LIBER 2.0 ')) + C.darkDim('─'.repeat(Math.max(0, width - 20)) + '╮'));
-  console.log(
-    '  ' + C.darkDim('│') + '  ' +
-    C.cyan(C.bold('▲ AGY TERMINAL')) +
-    C.dim('  Autonomous AI Agent Orchestrator') +
-    ' '.repeat(Math.max(0, width - 58)) +
-    C.purple('v0.2.0') + '  ' + C.darkDim('│')
-  );
-  console.log(
-    '  ' + C.darkDim('│') + '  ' +
-    C.dim('Agent: ') + C.bold(C.sky(agent)) + '  ' +
-    C.dim('Model: ') + C.amber(model) + '  ' +
-    C.dim('Daemon: ') + C.dim(`:${port}`) + ' [' + status + ']  ' +
-    C.darkDim('│')
-  );
-  console.log(
-    '  ' + C.darkDim('│') + '  ' +
-    C.dim('Dir: ') + C.dim(cwd.length > 50 ? '...' + cwd.slice(-47) : cwd) +
-    ' '.repeat(Math.max(0, width - (cwd.length > 50 ? 56 : cwd.length + 9))) +
-    C.darkDim('│')
-  );
-  console.log(C.darkDim('  ╰─') + C.darkDim('─'.repeat(Math.max(0, width - 6))) + C.darkDim('─╯'));
+  console.log(topBar);
+  console.log(formatBoxRow(row1, innerWidth));
+  console.log(formatBoxRow(row2, innerWidth));
+  console.log(formatBoxRow(row3, innerWidth));
+  console.log(bottomBar);
   console.log(
     '  ' + C.dim('Type prompt to begin, or ') +
     C.cyan('/help') + C.dim(' for commands (') +
-    C.dim('/status, /tools, /model, /logs, /clear, /exit') + C.dim(')')
+    C.dim('/status, /tools, /model, /logs, /tui, /clear, /exit') + C.dim(')')
   );
   console.log();
 }
