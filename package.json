@@ -4,7 +4,7 @@
   "description": "LiBER — autonomous agent orchestrator with a machine-enforced grounding gate",
   "bin": { "liber": "bin/liber", "liberd": "bin/liberd-entry" },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test",
     "start": "node bin/liber",
     "daemon": "node bin/liberd-entry"
   },
