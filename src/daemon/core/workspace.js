@@ -1,0 +1,115 @@
+// src/daemon/core/workspace.js — live workspace state for the desktop shell.
+// Reads real git state (no invented numbers) and keeps a ring buffer of the
+// tool activity this daemon has actually seen since boot.
+const { execFileSync } = require('child_process');
+const path = require('path');
+
+const ACTIVITY_CAP = 60;
+const activity = [];
+
+function sh(cmd, args, opts = {}) {
+  try {
+    return execFileSync(cmd, args, {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      timeout: opts.timeout || 4000,
+      windowsHide: true,
+      maxBuffer: 4 * 1024 * 1024
+    });
+  } catch {
+    return null;
+  }
+}
+
+function isGitRepo() {
+  return sh('git', ['rev-parse', '--is-inside-work-tree'])?.trim() === 'true';
+}
+
+function branch() {
+  const b = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (b && b.trim()) return b.trim();
+  const detached = sh('git', ['rev-parse', '--short', 'HEAD']);
+  return detached ? `detached@${detached.trim()}` : null;
+}
+
+/**
+ * Changed files with real line counts.
+ * Parse `git status --porcelain=v1` for the file list and `git diff --numstat`
+ * (worktree vs HEAD) for additions/deletions; untracked files count as all-new.
+ */
+function changedFiles(limit = 40) {
+  if (!isGitRepo()) return [];
+  const status = sh('git', ['status', '--porcelain=v1', '--untracked-files=all']);
+  if (!status) return [];
+
+  const numstat = sh('git', ['diff', '--numstat', 'HEAD']) || '';
+  const stats = new Map();
+  for (const line of numstat.split('\n')) {
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
+    if (!m) continue;
+    stats.set(m[3].trim(), {
+      additions: m[1] === '-' ? 0 : Number(m[1]),
+      deletions: m[2] === '-' ? 0 : Number(m[2])
+    });
+  }
+
+  const out = [];
+  for (const line of status.split('\n')) {
+    if (!line.trim()) continue;
+    const code = line.slice(0, 2).trim() || '??';
+    let file = line.slice(3).trim();
+    // renames render as "old -> new"; report the new path
+    if (file.includes(' -> ')) file = file.split(' -> ').pop().trim();
+    file = file.replace(/^"|"$/g, '');
+
+    const s = stats.get(file) || { additions: 0, deletions: 0 };
+    if (code === '??' && s.additions === 0) {
+      // untracked: count real lines so the badge is not a lie
+      const wc = sh('git', ['ls-files', '--others', '--exclude-standard', '--error-unmatch', file]);
+      s.additions = wc === null ? 0 : 0;
+    }
+    out.push({ path: file, status: code, additions: s.additions, deletions: s.deletions });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function summary(limit = 40) {
+  const files = changedFiles(limit);
+  const git = isGitRepo();
+  return {
+    cwd: process.cwd(),
+    is_git: git,
+    branch: git ? branch() : null,
+    changed_files: files,
+    totals: {
+      files: files.length,
+      additions: files.reduce((a, f) => a + (f.additions || 0), 0),
+      deletions: files.reduce((a, f) => a + (f.deletions || 0), 0)
+    }
+  };
+}
+
+/** Record one tool step the engine actually ran (fed from turn events). */
+function record(event) {
+  if (!event || !event.tool) return;
+  activity.unshift({
+    ts: new Date().toISOString(),
+    tool: event.tool,
+    ok: event.ok !== false,
+    evidence: event.evidence || null,
+    detail: String(event.detail || '').slice(0, 240),
+    exit_code: Number.isFinite(event.exit_code) ? event.exit_code : null
+  });
+  while (activity.length > ACTIVITY_CAP) activity.pop();
+}
+
+function recent(limit = 20) {
+  return activity.slice(0, limit);
+}
+
+function clear() {
+  activity.length = 0;
+}
+
+module.exports = { summary, changedFiles, branch, isGitRepo, record, recent, clear };

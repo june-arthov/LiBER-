@@ -2,7 +2,8 @@
 // Every key a client may change is declared here with a type; anything else is
 // rejected. Persistence patches only the targeted YAML lines, comments intact.
 const PROVIDERS = new Set(['openai', 'ollama', 'anthropic', 'gemini']);
-const TERMINAL_MODES = new Set(['read_only', 'allowlist', 'prompt']);
+const TERMINAL_MODES = new Set(['read_only', 'allowlist', 'prompt', 'open']);
+const REASONING_EFFORTS = new Set(['auto', 'low', 'medium', 'high']);
 const MODEL_RE = /^[A-Za-z0-9._:\/-]{1,64}$/;
 
 const SCHEMA = {
@@ -10,6 +11,10 @@ const SCHEMA = {
   'engine.model': { kind: 'model' },
   'engine.endpoint': { kind: 'endpoint' },
   'engine.context_window_override': { kind: 'int', min: 0, max: 1_048_576 },
+  'engine.reasoning_effort': { kind: 'enum', values: REASONING_EFFORTS },
+  'engine.max_tokens': { kind: 'int', min: 0, max: 1_048_576 },
+  'engine.temperature': { kind: 'float', min: 0, max: 2 },
+  'engine.top_p': { kind: 'float', min: 0, max: 1 },
   'grounding.enabled': { kind: 'boolean' },
   'grounding.max_repairs': { kind: 'int', min: 0, max: 5 },
   'grounding.require_readback': { kind: 'boolean' },

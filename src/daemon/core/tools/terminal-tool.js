@@ -75,6 +75,10 @@ function evaluatePolicy(command) {
     return { denied: false };
   }
 
+  if (term.mode === 'open') {
+    return { denied: false };
+  }
+
   if (term.mode === 'read_only' && MUTATION_PATTERNS.some(pattern => pattern.test(cmd))) {
     const allowed = term.allowlist.some(p => p && lower.startsWith(String(p).toLowerCase()));
     if (!allowed) {

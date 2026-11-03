@@ -17,7 +17,7 @@ function configure(policyConfig = {}) {
       : DEFAULTS.write_roots,
     allow_outside_workspace: policyConfig.allow_outside_workspace === true,
     terminal: {
-      mode: ['read_only', 'allowlist', 'prompt'].includes(policyConfig.terminal?.mode)
+      mode: ['read_only', 'allowlist', 'prompt', 'open'].includes(policyConfig.terminal?.mode)
         ? policyConfig.terminal.mode
         : DEFAULTS.terminal.mode,
       allowlist: (policyConfig.terminal?.allowlist || []).map(String),

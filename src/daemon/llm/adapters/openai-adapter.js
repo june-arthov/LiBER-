@@ -36,6 +36,8 @@ class OpenAIAdapter extends LLMAdapter {
       max_tokens: options.max_tokens || this.config.max_tokens || undefined,
       stream: false
     };
+    const effort = options.reasoning_effort ?? this.config.reasoning_effort;
+    if (effort && effort !== 'auto') body.reasoning_effort = effort;
     if (Array.isArray(options.tools) && options.tools.length) {
       body.tools = options.tools;
       body.tool_choice = options.tool_choice || 'auto';

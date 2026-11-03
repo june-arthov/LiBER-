@@ -23,11 +23,13 @@ agent:
     #               key: GEMINI_API_KEY · model: gemini-2.5-pro
     # Put the key in .env (or your environment) — never in this file.
     provider: "openai" # Uses openai-adapter compatible with Ollama Cloud
-    model: "glm-5.3-flash" # Active cloud model
+    model: "kimi-k2.7-code" # Active cloud model
     endpoint: "https://ollama.com/v1" # Ollama Cloud endpoint
     apiKey: "${OLLAMA_CLOUD_API_KEY}" # Loaded automatically from .env or environment
     temperature: 0.2
     max_tokens: 4096
+    top_p: 1
+    reasoning_effort: "auto" # auto | low | medium | high — forwarded when the provider supports it
     stream: true           # stream model output as DRAFT (unverified) while the audit runs
     native_tools: true     # use the provider's tool-calling API; falls back to the text protocol on error
     retry_attempts: 3      # transient provider errors (429/5xx/timeout) are retried with backoff
@@ -62,7 +64,7 @@ policy:
   write_roots: ["."]            # relative to the daemon's working directory
   allow_outside_workspace: false # true allows write_file/patch outside write_roots
   terminal:
-    mode: "read_only"            # read_only: block state-changing commands · allowlist: only the list · prompt: HITL only
+    mode: "allowlist" # read_only: block state-changing commands · allowlist: only the list · prompt: HITL only
     allowlist: ["npm test", "node --test", "git add", "git commit", "git push"]
     denylist: []
 

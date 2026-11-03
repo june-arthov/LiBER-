@@ -14,6 +14,8 @@ const policy = require('./core/policy');
 const journal = require('./core/journal');
 const modelSwitch = require('./core/model-switch');
 const configApply = require('./core/config-apply');
+const workspace = require('./core/workspace');
+const skills = require('./core/skills');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -295,6 +297,96 @@ class LiberDaemon {
         }
         return;
       }
+      else if (endpoint === '/workspace') {
+        res.end(JSON.stringify({ success: true, workspace: workspace.summary(), activity: workspace.recent(20) }));
+      }
+      else if (endpoint === '/skills') {
+        const scanned = skills.scan(true);
+        const list = Array.from(scanned.values ? scanned.values() : Object.values(scanned))
+          .map(s => ({
+            name: s.name,
+            description: String(s.description || '').slice(0, 200),
+            source: s.source || null,
+            always: !!s.always,
+            triggers: s.triggers || [],
+            bytes: s.size || (String(s.body || '').length || null)
+          }));
+        res.end(JSON.stringify({ success: true, skills: list, index: skills.indexLines() }));
+      }
+      else if (endpoint === '/compact') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { agentId, keep = 6 } = JSON.parse(body || '{}');
+        const id = agentId || Array.from(this.agents.keys())[0];
+        const before = memory.get(id).length;
+        if (before <= keep + 2) {
+          res.end(JSON.stringify({
+            success: false,
+            error: `Nothing to compact (${before} messages, keep=${keep}).`,
+            before
+          }));
+          return;
+        }
+        const history = memory.get(id);
+        const old = history.slice(0, history.length - keep);
+        const tail = history.slice(-keep);
+        const transcript = old
+          .map(m => `${m.role.toUpperCase()}: ${String(m.content).slice(0, 1200)}`)
+          .join('\n');
+        let method = 'trim';
+        let summary = '';
+        try {
+          const out = await llmManager.generate([
+            {
+              role: 'system',
+              content: 'Summarize this conversation history so an agent can continue the work. Keep decisions, files touched, open questions, and any verified facts with their receipt ids. Be dense; no preamble.'
+            },
+            { role: 'user', content: transcript }
+          ], { temperature: 0.1, max_tokens: 700 });
+          summary = String(out?.content || '').trim();
+          if (summary) method = 'model';
+        } catch {
+          method = 'trim';
+        }
+        if (!summary) {
+          summary = `[COMPACTED] ${old.length} earlier messages dropped; the last ${keep} are below.`;
+        }
+        memory.clear(id);
+        memory.add(id, 'system', `[COMPACTED HISTORY]\n${summary}`);
+        for (const m of tail) memory.add(id, m.role, m.content);
+        res.end(JSON.stringify({
+          success: true,
+          method,
+          before,
+          after: memory.get(id).length,
+          summary_chars: summary.length
+        }));
+      }
+      else if (endpoint === '/revert') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { agentId, turns = 1 } = JSON.parse(body || '{}');
+        const id = agentId || Array.from(this.agents.keys())[0];
+        const history = memory.get(id);
+        if (!history.length) {
+          res.end(JSON.stringify({ success: false, error: 'No history to revert.' }));
+          return;
+        }
+        let dropped = 0;
+        for (let i = 0; i < Math.max(1, Math.min(Number(turns) || 1, 10)); i++) {
+          while (history.length && history[history.length - 1].role === 'assistant') {
+            history.pop();
+            dropped++;
+          }
+          if (history.length && history[history.length - 1].role === 'user') {
+            history.pop();
+            dropped++;
+          }
+        }
+        memory.clear(id);
+        for (const m of history) memory.add(id, m.role, m.content);
+        res.end(JSON.stringify({ success: true, dropped, remaining: memory.get(id).length }));
+      }
       else if (endpoint === '/config') {
         if (req.method === 'GET') {
           const first = Array.from(this.agents.values())[0];
@@ -410,6 +502,17 @@ class LiberDaemon {
         res.setHeader('Access-Control-Allow-Origin', '*');
 
         const sendEvent = (event, data) => {
+          // Feed the desktop Overview rail with the tool steps this daemon
+          // actually executed (observations only — no invented entries).
+          if (event === 'observation') {
+            workspace.record({
+              tool: data.tool,
+              ok: data.ok,
+              evidence: data.evidence,
+              detail: data.command || data.output,
+              exit_code: data.exit_code
+            });
+          }
           res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         };
 
