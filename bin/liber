@@ -1,0 +1,328 @@
+#!/usr/bin/env node
+// bin/liber — Liber AI Agent Orchestrator CLI (Agy Terminal Interface)
+const { Command } = require('commander');
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
+const ui = require('../src/cli/ui');
+const { C } = ui;
+
+const ROOT = path.resolve(__dirname, '..');
+const PORT = parseInt(process.env.LIBER_PORT || '4567', 10);
+
+const program = new Command();
+program
+  .name('liber')
+  .description('Minimalist-Utilitarian AI Agent Orchestrator — Agy Terminal')
+  .version('0.2.0');
+
+// HTTP request helper to daemon
+function requestDaemon(route, method = 'GET', body = null, timeout = 120000) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: PORT,
+        path: route,
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        timeout
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            reject(new Error('Invalid response from daemon'));
+          }
+        });
+      }
+    );
+
+    req.on('timeout', () => req.destroy(new Error('Daemon request timed out')));
+    req.on('error', (err) => {
+      if (err.code === 'ECONNREFUSED') {
+        reject(new Error('Daemon not running. Run: liber spawn'));
+      } else {
+        reject(err);
+      }
+    });
+
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+// Health check helper
+async function isDaemonUp() {
+  try {
+    const res = await requestDaemon('/ps', 'GET', null, 1500);
+    return res && res.success;
+  } catch {
+    return false;
+  }
+}
+
+// Ensure daemon is running, auto-spawning if needed
+async function ensureDaemon(configPath = 'liber.yaml') {
+  if (await isDaemonUp()) return true;
+
+  console.log(C.dim('  ⚡ Daemon is offline. Starting Liber daemon in background...'));
+  const outLog = fs.openSync(path.join(process.cwd(), 'liberd.out.log'), 'a');
+  const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'liberd-entry')], {
+    cwd: process.cwd(),
+    detached: true,
+    stdio: ['ignore', outLog, outLog],
+    windowsHide: true,
+    env: { ...process.env, LIBER_CONFIG: configPath }
+  });
+  child.unref();
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    if (await isDaemonUp()) {
+      console.log(C.green(`  ✔ Daemon ready (PID: ${child.pid}, port: ${PORT})\n`));
+      return true;
+    }
+  }
+
+  throw new Error('Failed to start daemon automatically. Check liberd.out.log');
+}
+
+// Ask question to agent
+async function askAgent(agentId, message) {
+  const res = await requestDaemon('/chat', 'POST', { agentId, message });
+  if (!res.success) throw new Error(res.error || 'Chat request failed');
+  return res;
+}
+
+// Retrieve primary agent
+async function getPrimaryAgent() {
+  try {
+    const res = await requestDaemon('/ps');
+    if (res.success && res.data && res.data.length > 0) {
+      return res.data[0].id;
+    }
+  } catch { /* ignore */ }
+  return 'dev-bot';
+}
+
+// Render formatted status table
+async function formatStatusTable() {
+  const res = await requestDaemon('/ps');
+  if (!res.success) throw new Error(res.error);
+
+  const lines = [];
+  lines.push('');
+  lines.push(C.darkDim('  ╭─ ') + C.cyan(C.bold('AGENT FLEET STATUS')) + C.darkDim(' ──────────────────────────────────────╮'));
+  lines.push('  ' + C.darkDim('│ ') + C.bold('ID'.padEnd(16)) + C.bold('STATUS'.padEnd(12)) + C.bold('UPTIME'.padEnd(12)) + C.bold('REQUESTS'.padEnd(10)) + C.darkDim('│'));
+  lines.push('  ' + C.darkDim('├─' + '─'.repeat(52) + '┤'));
+
+  res.data.forEach((a) => {
+    const uptimeSec = Math.floor((Date.now() - a.startTime) / 1000);
+    const upStr = uptimeSec > 3600
+      ? `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`
+      : `${uptimeSec}s`;
+    const statusCol = a.status === 'RUNNING' ? C.green('● ' + a.status) : C.amber('○ ' + a.status);
+
+    lines.push(
+      '  ' + C.darkDim('│ ') +
+      C.sky(a.id.padEnd(16)) +
+      statusCol.padEnd(21) +
+      upStr.padEnd(12) +
+      String(a.metrics?.requests || 0).padEnd(10) +
+      C.darkDim('│')
+    );
+  });
+
+  lines.push(C.darkDim('  ╰─' + '─'.repeat(52) + '╯\n'));
+  return lines.join('\n');
+}
+
+// Slash command handlers for interactive session
+function getSlashCommands() {
+  return {
+    status: async () => await formatStatusTable(),
+    ps: async () => await formatStatusTable(),
+    tools: async () => {
+      const lines = [];
+      lines.push('');
+      lines.push(C.darkDim('  ╭─ ') + C.purple(C.bold('MERLIN ENGINE CORE TOOLS')) + C.darkDim(' ─────────────────────────────╮'));
+      const tools = [
+        ['read_file', 'Read file with line numbers, offset, and continuation hints'],
+        ['write_file', 'Atomic file writing with parent directory auto-creation'],
+        ['patch', 'Surgical code replacement with whitespace-tolerant fuzzy matching'],
+        ['search_files', 'Recursive regex content search & file path globbing'],
+        ['terminal', 'PowerShell/Bash host shell execution with exit codes'],
+        ['todo_list', 'Structured multi-step task planning & tracking'],
+        ['memory', 'Cross-session persistent knowledge & state bank'],
+      ];
+      tools.forEach(([cmd, desc]) => {
+        lines.push('  ' + C.darkDim('│ ') + C.cyan(cmd.padEnd(16)) + C.dim(desc));
+      });
+      lines.push(C.darkDim('  ╰─' + '─'.repeat(58) + '╯\n'));
+      return lines.join('\n');
+    },
+    model: async () => {
+      const cfgPath = path.resolve(process.cwd(), process.env.LIBER_CONFIG || 'liber.yaml');
+      let details = 'No liber.yaml found';
+      if (fs.existsSync(cfgPath)) {
+        const yaml = require('js-yaml');
+        const doc = yaml.load(fs.readFileSync(cfgPath, 'utf8'));
+        const eng = doc.agent?.engine || {};
+        details = [
+          `Provider:    ${eng.provider || 'unknown'}`,
+          `Model:       ${eng.model || 'unknown'}`,
+          `Endpoint:    ${eng.endpoint || 'unknown'}`,
+          `Temperature: ${eng.temperature || 0.7}`,
+          `Max Tokens:  ${eng.max_tokens || 2048}`
+        ].map(l => '  ' + C.darkDim('│ ') + C.amber(l)).join('\n');
+      }
+      return `\n${C.darkDim('  ╭─ ')}${C.amber(C.bold('ACTIVE LLM CONFIG'))}\n${details}\n${C.darkDim('  ╰─' + '─'.repeat(40))}\n`;
+    },
+    logs: async (arg) => {
+      const count = parseInt(arg || '8', 10);
+      const logFile = path.join(process.cwd(), 'liber.log');
+      if (!fs.existsSync(logFile)) return C.dim('\n  (liber.log is empty or not yet created)\n');
+      const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n').slice(-count);
+      const formatted = lines.map(l => {
+        try {
+          const e = JSON.parse(l);
+          const lvl = e.level === 'ERROR' ? C.badgeRed(e.level) : e.level === 'WARN' ? C.badgeAmber(e.level) : C.badgeGreen(e.level);
+          return `  ${lvl} ${C.dim(e.timestamp.slice(11, 19))} ${C.sky(e.agentId || 'SYSTEM')} ${C.bold(e.event)} ${C.darkDim(JSON.stringify(e.details || {}))}`;
+        } catch {
+          return '  ' + l;
+        }
+      });
+      return `\n${formatted.join('\n')}\n`;
+    }
+  };
+}
+
+// COMMAND: Default interactive Agy Terminal launcher
+async function runInteractive(targetAgent) {
+  try {
+    await ensureDaemon();
+    const agentId = targetAgent || await getPrimaryAgent();
+    ui.startAgySession({
+      agent: agentId,
+      port: PORT,
+      ask: (msg) => askAgent(agentId, msg),
+      commands: getSlashCommands()
+    });
+  } catch (err) {
+    console.error(`\n${C.red('✖ Fatal:')} ${err.message}\n`);
+    process.exit(1);
+  }
+}
+
+// COMMAND: spawn
+program
+  .command('spawn')
+  .description('Start the Liber daemon process in the background')
+  .option('-c, --config <file>', 'Path to liber.yaml configuration', 'liber.yaml')
+  .action(async (opts) => {
+    if (await isDaemonUp()) {
+      return console.log(`${C.green('✔')} Daemon is already running on port ${PORT}.`);
+    }
+    const outLog = fs.openSync(path.join(process.cwd(), 'liberd.out.log'), 'a');
+    const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'liberd-entry')], {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: ['ignore', outLog, outLog],
+      windowsHide: true,
+      env: { ...process.env, LIBER_CONFIG: opts.config }
+    });
+    child.unref();
+
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      if (await isDaemonUp()) {
+        return console.log(`${C.green('✔')} Liber Daemon active (PID: ${child.pid}, port: ${PORT}).`);
+      }
+    }
+    console.error(`${C.red('✖ Error:')} Daemon failed to start. Check liberd.out.log`);
+    process.exit(1);
+  });
+
+// COMMAND: stop
+program
+  .command('stop')
+  .description('Stop the running Liber daemon')
+  .action(async () => {
+    try {
+      await requestDaemon('/shutdown');
+      console.log(`${C.green('✔')} Liber Daemon stopped.`);
+    } catch (err) {
+      console.log(C.dim('Daemon was not running or has already stopped.'));
+    }
+  });
+
+// COMMAND: ps / status
+program
+  .command('ps')
+  .alias('status')
+  .description('Show running agents and telemetry status')
+  .action(async () => {
+    try {
+      console.log(await formatStatusTable());
+    } catch (err) {
+      console.error(`${C.red('✖ Error:')} ${err.message}`);
+    }
+  });
+
+// COMMAND: chat
+program
+  .command('chat [agentId] [message...]')
+  .description('Send a message to an agent or open the interactive Agy Terminal')
+  .action(async (agentId, words) => {
+    try {
+      await ensureDaemon();
+      const targetAgent = agentId || await getPrimaryAgent();
+      const message = (words || []).join(' ');
+
+      if (message) {
+        // One-shot execution with Agy formatting
+        const res = await askAgent(targetAgent, message);
+        ui.printAgentResponse(targetAgent, res);
+      } else {
+        // Interactive session
+        await runInteractive(targetAgent);
+      }
+    } catch (err) {
+      console.error(`\n${C.red('✖ Error:')} ${err.message}\n`);
+    }
+  });
+
+// COMMAND: logs
+program
+  .command('logs')
+  .description('Show structured telemetry logs from liber.log')
+  .option('-n, --lines <n>', 'Number of lines to view', '15')
+  .action(async (opts) => {
+    const logsOutput = await getSlashCommands().logs(opts.lines);
+    console.log(logsOutput);
+  });
+
+// COMMAND: tui
+program
+  .command('tui')
+  .description('Launch the Tactical Cyber-Obsidian Textual TUI dashboard')
+  .action(() => {
+    const pythonScript = path.join(ROOT, 'bin', 'liber-tui.py');
+    if (fs.existsSync(pythonScript)) {
+      spawn('python', [pythonScript], { stdio: 'inherit' });
+    } else {
+      spawn(process.execPath, [path.join(ROOT, 'bin', 'liber-tui')], { stdio: 'inherit' });
+    }
+  });
+
+// Default behavior when running `liber` with no arguments: Launch Agy Terminal
+if (process.argv.length <= 2) {
+  runInteractive();
+} else {
+  program.parse(process.argv);
+}

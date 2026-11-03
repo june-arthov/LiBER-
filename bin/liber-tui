@@ -1,0 +1,244 @@
+#!/usr/bin/env node
+// bin/liber-tui — Liber dashboard (blessed)
+const blessed = require('blessed');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const PORT = parseInt(process.env.LIBER_PORT || '4567', 10);
+const LOG_FILE = path.join(process.cwd(), 'liber.log');
+
+// ── Palette: named ANSI colors only (works in every terminal) ───────
+const P = {
+  text: 'white', dim: 'gray', cyan: 'lightcyan', blue: 'lightblue', green: 'lightgreen',
+  yellow: 'lightyellow', red: 'lightred', purple: 'lightmagenta',
+};
+const esc = (s) => blessed.escape(String(s));
+const fg = (c, s) => `{${c}-fg}${s}{/}`;
+// solid colored "pill": dark text on a bright background — visible everywhere
+const badge = (bg, s) => `{black-fg}{${bg}-bg}{bold} ${s} {/bold}{/}`;
+
+const screen = blessed.screen({
+  smartCSR: true, fullUnicode: true, terminal: 'xterm-256color', forceUnicode: true, title: 'LIBER',
+});
+
+// ── Header: solid gradient-ish bar ──────────────────────────────────
+const header = blessed.box({ top: 0, left: 0, width: '100%', height: 3, tags: true, style: { bg: 'blue' } });
+blessed.box({
+  parent: header, top: 1, left: 1, height: 1, width: 'shrink', tags: true,
+  content: `{white-fg}{blue-bg}{bold}${' ◢◤ L I B E R ◥◣ '}{/bold}{/}{lightcyan-fg}{blue-bg}  Agent Orchestrator{/}`,
+});
+const statusBox = blessed.box({ parent: header, top: 1, right: 1, height: 1, width: 'shrink', tags: true, style: { bg: 'blue' } });
+blessed.line({ parent: header, top: 0, left: 0, width: '100%', orientation: 'horizontal', style: { bg: 'blue' } });
+
+// ── Chat ────────────────────────────────────────────────────────────
+const chat = blessed.log({
+  top: 3, left: 0, bottom: 4, width: '68%', tags: true, label: badge(P.cyan, '◆ CONVERSATION'),
+  border: { type: 'line' }, padding: { left: 1, right: 1 },
+  scrollable: true, alwaysScroll: true, mouse: true, keys: true, vi: true,
+  scrollbar: { ch: '█', style: { fg: 'cyan' } },
+  style: { border: { fg: 'cyan' } },
+});
+
+// ── Sidebar ─────────────────────────────────────────────────────────
+const agentCard = blessed.box({
+  top: 3, left: '68%', width: '32%', height: 10, tags: true, label: badge(P.green, '● AGENT'),
+  border: { type: 'line' }, padding: { left: 1 }, style: { border: { fg: 'green' } },
+});
+const metrics = blessed.box({
+  top: 13, left: '68%', width: '32%', height: 8, tags: true, label: badge(P.yellow, '▲ LATENCY'),
+  border: { type: 'line' }, padding: { left: 1 }, style: { border: { fg: 'yellow' } },
+});
+const activity = blessed.log({
+  top: 21, left: '68%', width: '32%', bottom: 4, tags: true, label: badge(P.purple, '≡ ACTIVITY'),
+  border: { type: 'line' }, padding: { left: 1 }, scrollable: true, style: { border: { fg: 'magenta' } },
+});
+
+// ── Input + footer ──────────────────────────────────────────────────
+const inputBox = blessed.box({
+  bottom: 1, left: 0, width: '100%', height: 3, tags: true, border: { type: 'line' },
+  style: { border: { fg: 'lightblue' } },
+});
+blessed.box({ parent: inputBox, top: 0, left: 0, width: 5, height: 1, tags: true, content: badge(P.green, '❯') });
+const input = blessed.textbox({
+  parent: inputBox, top: 0, left: 6, right: 1, height: 1, inputOnFocus: true, style: { fg: 'white' },
+});
+const footerKeys = [['Enter', 'kirim', 'green'], ['PgUp/PgDn', 'scroll', 'cyan'], ['Ctrl+L', 'bersih', 'yellow'], ['Ctrl+C', 'keluar', 'red']];
+const footer = blessed.box({
+  bottom: 0, left: 0, width: '100%', height: 1, tags: true,
+  content: footerKeys.map(([k, d, c]) => `${badge(c, k)}${fg(P.dim, ' ' + d + '  ')}`).join(''),
+});
+
+[header, chat, agentCard, metrics, activity, inputBox, footer].forEach((w) => screen.append(w));
+
+// ── State & helpers ─────────────────────────────────────────────────
+const state = { online: false, agent: null, latencies: [], busy: false, frame: 0, sent: 0 };
+const SPARK = '▁▂▃▄▅▆▇█';
+const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+function request(route, method = 'GET', body = null) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname: '127.0.0.1', port: PORT, path: route, method, headers: { 'Content-Type': 'application/json' }, timeout: 120000 }, (res) => {
+      let d = ''; res.on('data', (c) => (d += c));
+      res.on('end', () => { try { resolve(JSON.parse(d)); } catch { reject(new Error('Respon tidak valid')); } });
+    });
+    req.on('timeout', () => req.destroy(new Error('Timeout')));
+    req.on('error', reject);
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+const stamp = () => new Date().toTimeString().slice(0, 8);
+const fmtUp = (s) => `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+function say(who, text) {
+  const [color, tag] = who === 'user' ? [P.green, 'YOU'] : who === 'error' ? [P.red, 'ERROR'] : [P.cyan, String(who).toUpperCase()];
+  const bar = fg(color, '▌ ');
+  chat.add(`${badge(color, tag)} ${fg(P.dim, stamp())}`);
+  let inCode = false;
+  for (const raw of String(text).split('\n')) {
+    if (raw.trim().startsWith('```')) {
+      inCode = !inCode;
+      chat.add(bar + fg(P.dim, inCode ? '╭─ ' + esc(raw.trim().slice(3) || 'code') : '╰─'));
+      continue;
+    }
+    if (inCode) { chat.add(bar + fg(P.dim, '│ ') + fg(P.yellow, esc(raw))); continue; }
+    chat.add(bar + esc(raw)
+      .replace(/\*\*(.+?)\*\*/g, (_, b) => `{bold}${b}{/bold}`)
+      .replace(/`([^`]+)`/g, (_, k) => fg(P.yellow, k)));
+  }
+  chat.add('');
+}
+
+function welcome() {
+  const logo = [
+    '██╗     ██╗██████╗ ███████╗██████╗ ',
+    '██║     ██║██╔══██╗██╔════╝██╔══██╗',
+    '██║     ██║██████╔╝█████╗  ██████╔╝',
+    '██║     ██║██╔══██╗██╔══╝  ██╔══██╗',
+    '███████╗██║██████╔╝███████╗██║  ██║',
+    '╚══════╝╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝',
+  ];
+  const cols = [P.cyan, P.cyan, P.blue, P.blue, P.purple, P.purple];
+  chat.add('');
+  logo.forEach((l, i) => chat.add('  {bold}' + fg(cols[i], l) + '{/bold}'));
+  chat.add('');
+  chat.add('  ' + fg(P.dim, 'Minimalist-Utilitarian AI Agent Orchestrator'));
+  chat.add('  ' + badge(P.green, 'Enter') + fg(P.dim, ' kirim pesan   ') + badge(P.cyan, 'PgUp') + fg(P.dim, ' scroll'));
+  chat.add('');
+}
+
+function renderHeader() {
+  const dot = state.online ? '{lightgreen-fg}●{/}' : '{lightred-fg}●{/}';
+  const label = state.online ? '{lightgreen-fg}online{/}' : '{lightred-fg}offline{/}';
+  statusBox.setContent(`{blue-bg}${dot}{blue-bg} ${label}{white-fg}{blue-bg}  :${PORT}  │  ${stamp()} {/}`);
+}
+
+const bar = (frac, w, color) => {
+  const n = Math.max(0, Math.min(w, Math.round(frac * w)));
+  return fg(color, '█'.repeat(n)) + fg(P.dim, '░'.repeat(w - n));
+};
+
+function renderSide(agent) {
+  if (!agent) {
+    agentCard.setContent(`\n${fg(P.red, '✖ Daemon tidak terjangkau')}\n\n${fg(P.dim, 'Jalankan:')}\n  ${badge(P.yellow, 'liber spawn')}`);
+  } else {
+    const up = Math.floor((Date.now() - agent.startTime) / 1000);
+    const row = (k, v) => `${fg(P.dim, k.padEnd(9))}${v}`;
+    agentCard.setContent([
+      '', `{bold}${fg(P.cyan, '◆ ' + esc(agent.id))}{/bold}`, '',
+      row('status', fg(P.green, '● ' + agent.status)),
+      row('uptime', fmtUp(up)),
+      row('requests', fg(P.cyan, agent.metrics.requests)),
+      row('model', esc(agent.config?.engine?.model || '-')),
+    ].join('\n'));
+  }
+  const L = state.latencies.slice(-24);
+  if (!L.length) metrics.setContent(`\n${fg(P.dim, 'belum ada data')}`);
+  else {
+    const max = Math.max(...L), avg = L.reduce((a, b) => a + b, 0) / L.length, last = L[L.length - 1];
+    const spark = L.map((v) => SPARK[Math.min(7, Math.floor((v / (max || 1)) * 7))]).join('');
+    metrics.setContent([
+      '', fg(P.yellow, spark), '',
+      `${fg(P.dim, 'avg ')}${bar(avg / (max || 1), 8, P.green)} ${(avg / 1000).toFixed(1)}s`,
+      `${fg(P.dim, 'last')}${bar(last / (max || 1), 8, P.cyan)} ${(last / 1000).toFixed(1)}s`,
+    ].join('\n'));
+  }
+}
+
+function renderInputLabel() {
+  inputBox.setLabel(state.busy
+    ? badge(P.yellow, `${FRAMES[state.frame % FRAMES.length]} berpikir…`)
+    : badge(P.blue, `pesan untuk ${state.agent || 'agent'}`));
+}
+
+async function poll() {
+  try {
+    const res = await request('/ps');
+    state.online = !!res.success;
+    const a = res.data && res.data[0];
+    if (a) state.agent = a.id;
+    renderSide(a);
+  } catch { state.online = false; renderSide(null); }
+  renderHeader();
+  renderInputLabel();
+  screen.render();
+}
+
+let logPos = 0;
+function tailLog() {
+  try {
+    const st = fs.statSync(LOG_FILE);
+    if (logPos === 0) logPos = Math.max(0, st.size - 2000);
+    if (st.size < logPos) logPos = 0;
+    if (st.size > logPos) {
+      const fd = fs.openSync(LOG_FILE, 'r'); const buf = Buffer.alloc(st.size - logPos);
+      fs.readSync(fd, buf, 0, buf.length, logPos); fs.closeSync(fd); logPos = st.size;
+      for (const l of buf.toString('utf8').split('\n').filter(Boolean)) {
+        try {
+          const e = JSON.parse(l);
+          const col = e.level === 'ERROR' ? P.red : e.level === 'WARN' ? P.yellow : P.green;
+          activity.add(`${fg(col, '●')} ${fg(P.dim, e.timestamp.slice(11, 19))} ${esc(e.event)}`);
+        } catch { /* partial line */ }
+      }
+    }
+  } catch { /* no log yet */ }
+}
+
+// ── Input handling ──────────────────────────────────────────────────
+input.on('submit', async (value) => {
+  const text = (value || '').trim();
+  input.clearValue();
+  if (!text || state.busy) { input.readInput(); return screen.render(); }
+  say('user', text);
+  state.busy = true;
+  const t0 = Date.now();
+  try {
+    if (!state.agent) throw new Error('Daemon belum berjalan (liber spawn)');
+    const res = await request('/chat', 'POST', { agentId: state.agent, message: text });
+    if (!res.success) throw new Error(res.error);
+    state.latencies.push(Date.now() - t0); state.sent++;
+    say(state.agent, res.response);
+  } catch (e) { say('error', e.message); }
+  state.busy = false;
+  poll(); tailLog();
+  input.readInput();
+  screen.render();
+});
+input.on('cancel', () => input.readInput());
+
+screen.key(['C-c'], () => process.exit(0));
+input.key(['C-c'], () => process.exit(0));
+screen.key(['C-l'], () => { chat.setContent(''); screen.render(); });
+screen.key(['pageup'], () => { chat.scroll(-Math.floor(chat.height / 2)); screen.render(); });
+screen.key(['pagedown'], () => { chat.scroll(Math.floor(chat.height / 2)); screen.render(); });
+
+setInterval(() => { if (state.busy) { state.frame++; renderInputLabel(); screen.render(); } }, 90);
+setInterval(() => { poll(); tailLog(); }, 2000);
+
+welcome();
+renderInputLabel(); renderHeader();
+poll(); tailLog();
+input.readInput();
+screen.render();

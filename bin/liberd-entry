@@ -1,0 +1,12 @@
+#!/usr/bin/env node
+// bin/liberd-entry
+const liberd = require('../src/daemon/liberd');
+
+// Handle termination signals for clean shutdown
+process.on('SIGINT', () => liberd.stop());
+process.on('SIGTERM', () => liberd.stop());
+
+liberd.start().catch(err => {
+  console.error(`[FATAL] Daemon crashed: ${err.message}`);
+  process.exit(1);
+});
