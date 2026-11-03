@@ -143,6 +143,31 @@ Run the enforcement suite with `npm test` (153 tests, including a scripted model
 gets blocked, and is forced to read the file before answering, plus a 15-case grounding regression
 dataset). CI runs the suite on Linux and Windows via `.github/workflows/ci.yml`.
 
+## 🔌 Providers
+
+Liber talks to any provider through one of four adapters. The key goes in `.env`
+(or your shell environment) — never in `liber.yaml`.
+
+| Adapter | Provider(s) | `provider` | `endpoint` | Key env var |
+|---|---|---|---|---|
+| OpenAI-compatible | OpenAI, Groq, Mistral, DeepSeek, OpenRouter, xAI, Together, Ollama Cloud | `openai` | e.g. `https://api.openai.com/v1` | `OPENAI_API_KEY` (falls back to `OLLAMA_CLOUD_API_KEY`) |
+| Anthropic | Claude models | `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| Google | Gemini models | `gemini` | `https://generativelanguage.googleapis.com` | `GEMINI_API_KEY` (falls back to `GOOGLE_API_KEY`) |
+| Ollama native | local Ollama servers | `ollama` | e.g. `http://localhost:11434` | none required |
+
+Details:
+
+- **OpenAI-compatible** covers every provider that speaks `/chat/completions`. Change
+  `engine.provider`, `engine.endpoint`, `engine.model` and the key — nothing else.
+- **Anthropic** is a dedicated adapter: system messages move to the `system` parameter,
+  consecutive same-role turns are merged (the Messages API rejects repeats), and native
+  tool calling is translated both ways (`tool_calls` ↔ `tool_use`/`tool_result`).
+- **Gemini** translates roles into `contents`/`systemInstruction` and streams via
+  `streamGenerateContent?alt=sse`. Native tool calling is not implemented — the engine
+  falls back to the text protocol automatically.
+- **Streaming** works on all adapters; a failed stream always falls back to a full,
+  audited completion.
+
 ## 📚 Skill Library
 
 Skills are procedures, not prompt text: each one is a `SKILL.md` with a one-line "use when"
