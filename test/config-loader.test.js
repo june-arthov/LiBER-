@@ -42,3 +42,13 @@ test('openai provider still falls back to OLLAMA_CLOUD_API_KEY', () => {
   const config = ConfigLoader.load('liber.yaml');
   assert.equal(config.agent.engine.apiKey, 'ollama-key-123');
 });
+
+test('endpoint host decides the key name for OpenAI-compatible vendors', () => {
+  writeConfig('openai');
+  fs.writeFileSync(path.join(tmp, '.env'), 'GROQ_API_KEY=gsk-test-1\nOLLAMA_CLOUD_API_KEY=ollama-key-123\n');
+
+  assert.equal(ConfigLoader.resolveApiKey('openai', 'https://api.groq.com/openai/v1'), 'gsk-test-1');
+  assert.equal(ConfigLoader.resolveApiKey('openai', 'https://api.deepseek.com/v1'), null);
+  assert.equal(ConfigLoader.resolveApiKey('openai', 'https://ollama.com/v1'), 'ollama-key-123');
+  assert.equal(ConfigLoader.resolveApiKey('ollama', 'http://localhost:11434'), null, 'local Ollama needs no key');
+});

@@ -252,17 +252,16 @@ class LiberDaemon {
         const changed = {};
         for (const [id, agent] of this.agents.entries()) {
           const engine = agent.config.engine;
-          let keyResolved = true;
           if (spec.provider && engine.provider !== spec.provider) {
             engine.provider = spec.provider;
-            const key = ConfigLoader.resolveApiKey(spec.provider);
-            if (key) engine.apiKey = key;
-            else keyResolved = false;
           }
           engine.model = spec.model;
           if (spec.endpoint) engine.endpoint = spec.endpoint;
+          // Endpoint-aware key: Groq/DeepSeek/Mistral/... each need their own key.
+          const key = ConfigLoader.resolveApiKey(engine.provider, engine.endpoint);
+          if (key) engine.apiKey = key;
           llmManager.initialize(engine);
-          changed[id] = { ...modelSwitch.sanitizeEngine(engine), key_resolved: keyResolved };
+          changed[id] = { ...modelSwitch.sanitizeEngine(engine), key_resolved: !!key };
         }
 
         this.persistModelChange({ provider: spec.provider, model: spec.model, endpoint: spec.endpoint });

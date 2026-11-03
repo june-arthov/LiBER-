@@ -10,31 +10,55 @@ const KEY_ENV = {
   ollama: ['OLLAMA_CLOUD_API_KEY', 'OPENAI_API_KEY']
 };
 
-/**
- * Provider-aware key resolution: process environment wins over .env.
- */
-function resolveApiKey(provider) {
-  const envNames = KEY_ENV[String(provider || 'openai').toLowerCase()] || KEY_ENV.openai;
+// OpenAI-compatible vendors use their own key names — resolve by endpoint host.
+const ENDPOINT_KEY_ENV = [
+  [/groq\.com/i, ['GROQ_API_KEY']],
+  [/deepseek\.com/i, ['DEEPSEEK_API_KEY']],
+  [/mistral\.ai/i, ['MISTRAL_API_KEY']],
+  [/openrouter\.ai/i, ['OPENROUTER_API_KEY']],
+  [/api\.x\.ai/i, ['XAI_API_KEY']],
+  [/together\.xyz/i, ['TOGETHER_API_KEY']],
+  [/ollama\.com/i, ['OLLAMA_CLOUD_API_KEY']],
+  [/api\.openai\.com/i, ['OPENAI_API_KEY']],
+  [/anthropic\.com/i, ['ANTHROPIC_API_KEY']],
+  [/generativelanguage\.googleapis\.com/i, ['GEMINI_API_KEY', 'GOOGLE_API_KEY']],
+  [/localhost|127\.0\.0\.1/i, []] // local Ollama needs no key
+];
 
-  const fromEnv = envNames.map(n => process.env[n]).find(Boolean);
-  if (fromEnv) return fromEnv;
-
+function envVarsFromFile() {
   try {
     const envPath = path.resolve(process.cwd(), '.env');
-    if (fs.existsSync(envPath)) {
-      const envContent = fs.readFileSync(envPath, 'utf8');
-      const envVars = Object.fromEntries(
-        envContent.split(/\r?\n/).filter(line => line.includes('=') && !line.trim().startsWith('#')).map(line => {
-          const idx = line.indexOf('=');
-          return [line.slice(0, idx).trim(), line.slice(idx + 1).trim()];
-        })
-      );
-      return envNames.map(n => envVars[n]).find(Boolean) || null;
-    }
+    if (!fs.existsSync(envPath)) return {};
+    return Object.fromEntries(
+      fs.readFileSync(envPath, 'utf8').split(/\r?\n/).filter(line => line.includes('=') && !line.trim().startsWith('#')).map(line => {
+        const idx = line.indexOf('=');
+        return [line.slice(0, idx).trim(), line.slice(idx + 1).trim()];
+      })
+    );
   } catch {
-    return null;
+    return {};
   }
-  return null;
+}
+
+function lookup(names) {
+  const fromEnv = names.map(n => process.env[n]).find(Boolean);
+  if (fromEnv) return fromEnv;
+  const file = envVarsFromFile();
+  return names.map(n => file[n]).find(Boolean) || null;
+}
+
+/**
+ * Provider + endpoint aware key resolution: the endpoint host decides the key
+ * name first (Groq/DeepSeek/Mistral/... each have their own), then the provider.
+ * Process environment always wins over .env.
+ */
+function resolveApiKey(provider, endpoint) {
+  const ep = String(endpoint || '');
+  for (const [re, names] of ENDPOINT_KEY_ENV) {
+    if (re.test(ep)) return names.length ? lookup(names) : null;
+  }
+  const envNames = KEY_ENV[String(provider || 'openai').toLowerCase()] || KEY_ENV.openai;
+  return lookup(envNames);
 }
 
 class ConfigLoader {

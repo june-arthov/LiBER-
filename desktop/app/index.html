@@ -433,18 +433,15 @@ async function handleSSE(message) {
           renderAudit(payload);
           break;
         case 'grounding_pass':
-          renderAudit({ status: 'PASS', claims_checked: payload.claims_checked, ledger: { receipts: [] } });
+          // The 'final' event carries the authoritative ledger — audit renders there only.
           break;
         case 'final':
           if (payload.response) {
-            if (currentAnswer && currentAnswer.textContent.length) {
-              currentAnswer.textContent = payload.response;
-            } else {
-              const ans = ensureAnswer();
-              ans.textContent = '';
-              ans.innerHTML = markdownLite(payload.response);
-              currentAnswer = null;
-            }
+            // Always render the final answer fresh with markdown (streamed drafts
+            // are preview text only — the audited answer is the truth).
+            if (currentAnswer && currentAnswer.isConnected) currentAnswer.remove();
+            currentAnswer = addEl(currentTurn, 'div', 'answer', '');
+            currentAnswer.innerHTML = markdownLite(payload.response);
             if (payload.grounding && payload.grounding.status) renderAudit(payload.grounding);
           }
           break;
@@ -503,6 +500,7 @@ async function refreshFleet() {
     currentModel = m;
     $('model-text').textContent = m;
     $('pill-model').classList.add('online');
+    syncModelSelect(m);
   }
 }
 
@@ -513,6 +511,28 @@ function fillCatalog() {
     opt.value = c.model;
     opt.textContent = c.label;
     sel.appendChild(opt);
+  }
+}
+
+function syncModelSelect(model) {
+  const sel = $('model-select');
+  if (!model) return;
+  if (!CATALOG.some(c => c.model === model)) {
+    // Active model is not in the catalog — surface it honestly as the current one.
+    if (!sel.querySelector('option[data-active]')) {
+      const opt = document.createElement('option');
+      opt.value = model;
+      opt.textContent = `active: ${model}`;
+      opt.dataset.active = '1';
+      sel.prepend(opt);
+    } else {
+      const opt = sel.querySelector('option[data-active]');
+      opt.value = model;
+      opt.textContent = `active: ${model}`;
+    }
+    sel.value = model;
+  } else {
+    sel.value = model;
   }
 }
 
