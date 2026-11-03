@@ -239,3 +239,32 @@ test('the model can load a skill through the skill tool', async () => {
   assert.equal(res.grounding.ledger.receipts[0].ok, true);
   assert.equal(res.grounding.status, 'PASS', JSON.stringify(res.grounding.violations));
 });
+
+test('untagged reasoning before a tool call is captured and emitted', async () => {
+  const llm = scripted([
+    'I should inspect the manifest before saying anything about its version.\n[TOOL: read_file({"path": "package.json"})]',
+    '[FINAL: package.json declares version 0.1.0 [E1].]'
+  ]);
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-preamble',
+    agentConfig: cfg(),
+    userMessage: 'what is the version?',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 5
+  });
+
+  const thought = res.trace.find(t => t.type === 'thought');
+  assert.ok(thought, 'reasoning must be recorded in the trace');
+  assert.equal(thought.kind, 'preamble');
+  assert.match(thought.content, /inspect the manifest/);
+  assert.ok(events.some(x => x.e === 'thought' && x.d.kind === 'preamble'));
+  assert.equal(res.grounding.status, 'PASS');
+});
+
+test('a thought containing citation brackets is not truncated', () => {
+  const text = engine.extractThought('[THOUGHT: version is 0.1.0 [E1] so it matches] [FINAL: ok [E1]]');
+  assert.match(text, /\[E1\] so it matches/);
+});

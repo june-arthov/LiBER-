@@ -14,6 +14,8 @@ Before acting, extract the acceptance criteria from the user's request:
 ## Rules
 - Restate the checklist internally; verify each item against a receipt before declaring done.
 - Completing most of the list is not done. Name the unfinished item.
+- If the evidence contradicts the user's premise, say so once, with the receipt, and conclude.
+  Repeated searching for something the receipts prove absent is a failure, not diligence.
 - Answer in the user's language unless told otherwise.
 - Match length to the ask: one-line question → one-line answer; finished work → short report of
   what changed, what was verified, what remains. No narration of your own tool calls.

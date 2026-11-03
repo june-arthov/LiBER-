@@ -75,9 +75,73 @@ class MerlinEngine {
     return calls;
   }
 
+  /**
+   * Balanced-bracket slice starting at an opening '['.
+   * Handles citations like [E1] inside a [THOUGHT: ...] block.
+   */
+  balancedSlice(src, start) {
+    let depth = 0;
+    for (let i = start; i < src.length; i++) {
+      const ch = src[i];
+      if (ch === '[') depth++;
+      else if (ch === ']') {
+        depth--;
+        if (depth === 0) return src.slice(start, i + 1);
+      }
+    }
+    return null;
+  }
+
+  stripThoughts(text) {
+    let out = String(text);
+    let idx;
+    while ((idx = out.search(/\[THOUGHT:/i)) >= 0) {
+      const block = this.balancedSlice(out, idx);
+      if (!block) break;
+      out = out.slice(0, idx) + out.slice(idx + block.length);
+    }
+    return out
+      .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
+      .replace(/<\/?thought>/gi, '');
+  }
+
   extractThought(text) {
-    const m = String(text).match(/\[THOUGHT:\s*([\s\S]*?)\]/i) || String(text).match(/<thought>([\s\S]*?)<\/thought>/i);
+    const src = String(text);
+    const t = src.search(/\[THOUGHT:/i);
+    if (t >= 0) {
+      const block = this.balancedSlice(src, t);
+      if (block) {
+        const body = block.replace(/^\[THOUGHT:\s*/i, '').replace(/\]\s*$/, '').trim();
+        return body || null;
+      }
+    }
+    const m = src.match(/<thought>([\s\S]*?)<\/thought>/i);
     return m ? m[1].trim() : null;
+  }
+
+  /**
+   * Capture reasoning whether or not the model used a [THOUGHT:] tag.
+   * Untagged prose before the first tool/final marker is real reasoning and must be shown.
+   */
+  extractReasoning(text) {
+    const src = String(text);
+    const tagged = this.extractThought(src);
+
+    const marker = src.search(/\[(?:TOOL|EXEC|READ|WRITE|FINAL):/i);
+    let preamble = '';
+    if (marker > 0) {
+      preamble = this.stripThoughts(src.slice(0, marker))
+        .replace(/<\/?thought>/gi, ' ')
+        .trim();
+    }
+
+    if (tagged) {
+      return { content: preamble ? `${tagged}\n\n${preamble}` : tagged, kind: 'tagged' };
+    }
+    if (preamble.length >= 24) {
+      return { content: preamble, kind: 'preamble' };
+    }
+    return null;
   }
 
   /**
@@ -99,9 +163,8 @@ class MerlinEngine {
   }
 
   cleanAnswer(text) {
-    return String(text)
-      .replace(/\[THOUGHT:\s*[\s\S]*?\]\s*/i, '')
-      .replace(/<\/?thought>/gi, '')
+    return this.stripThoughts(String(text))
+      .replace(/\[\/?(?:TOOL|EXEC|READ|WRITE|FINAL):[\s\S]*?\]/gi, '')
       .trim();
   }
 
@@ -223,10 +286,10 @@ class MerlinEngine {
         completion_tokens: usage?.completion_tokens ?? null
       });
 
-      const thought = this.extractThought(response);
-      if (thought) {
-        trace.push({ type: 'thought', content: thought });
-        onEvent('thought', { content: thought });
+      const reasoning = this.extractReasoning(response);
+      if (reasoning) {
+        trace.push({ type: 'thought', content: reasoning.content, kind: reasoning.kind });
+        onEvent('thought', { content: reasoning.content, kind: reasoning.kind });
       }
 
       const explicitFinal = this.extractFinal(response);

@@ -130,7 +130,7 @@ is bound to a real receipt or explicitly labelled UNVERIFIED. It does not make t
 omniscient: receipt binding is syntactic (the claim cited *a* real receipt), so the doctrine still
 obliges the model to cite the receipt that actually proves the claim.
 
-Run the enforcement suite with `npm test` (62 tests, including a scripted model that hallucinates,
+Run the enforcement suite with `npm test` (64 tests, including a scripted model that hallucinates,
 gets blocked, and is forced to read the file before answering).
 
 ## 📚 Skill Library
@@ -154,6 +154,8 @@ Shipped skills: `iron-law` (always), `grounding-protocol` (always), `systematic-
 
 | Capability | Behaviour |
 |---|---|
+| Live reasoning | Each model turn's reasoning is captured — tagged `[THOUGHT: …]` or untagged prose before a tool call — and streamed to the CLI/TUI as a `REASONING` block before the answer. |
+| Streaming CLI | `liber` and `liber chat` consume `/chat/stream`, so reasoning, tool calls and observations appear as they happen instead of only at the end. |
 | Retry with backoff | 429/5xx/timeout are retried up to `retry_attempts` (default 3); auth/4xx errors are never retried. |
 | Session persistence | The conversation window survives daemon restarts in `.liber/session.json` (`liber reset` clears it). |
 | Trace audit | Every completed turn appends one JSONL record to `.liber/traces/YYYY-MM-DD.jsonl`. |

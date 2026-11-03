@@ -439,7 +439,7 @@ class LiberApp(App):
             thought_text = data.get("content", "")
             self.log_widget.write(
                 Text.assemble(
-                    LiberCue.badge("THOUGHT", "black on #8B5CF6"),
+                    LiberCue.badge("REASONING", "black on #8B5CF6"),
                     (f" {thought_text}", "italic #E2E8F0")
                 )
             )

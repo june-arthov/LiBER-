@@ -175,11 +175,11 @@ function formatMarkdown(text) {
   return result.join('\n');
 }
 
-// Render cognitive pulse thought card
+// Render cognitive pulse / reasoning block
 function printThought(thought) {
   const width = Math.max(getCols(), 70);
-  console.log(C.darkDim('  ╭─ ') + C.amber('🧠 Cognitive Pulse ') + C.darkDim('─'.repeat(Math.max(0, width - 24))));
-  thought.split('\n').forEach(line => {
+  console.log(C.darkDim('  ╭─ ') + C.amber('🧠 REASONING ') + C.darkDim('─'.repeat(Math.max(0, width - 22))));
+  String(thought).split('\n').forEach(line => {
     console.log(C.darkDim('  │ ') + C.dim(line));
   });
   console.log(C.darkDim('  ╰─' + '─'.repeat(Math.max(0, width - 8))));
@@ -254,7 +254,66 @@ function printAgentResponse(agent, responseData) {
   }
 }
 
-// Launch the interactive Agy Terminal session
+// Print only the answer (used when the stream already rendered reasoning and tools)
+function printAnswerOnly(agent, responseData) {
+  printAgentResponse(agent, { ...responseData, trace: [] });
+}
+
+function truncateText(value, max = 400) {
+  const s = String(value == null ? '' : value).replace(/\r/g, '').trim();
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+// Render a daemon SSE event live in the terminal
+function printStreamEvent(event, data = {}) {
+  switch (event) {
+    case 'thought':
+      if (data.content) printThought(data.content);
+      break;
+
+    case 'tool_dispatch': {
+      const name = data.tool || 'tool';
+      const detail = data.command || JSON.stringify(data.args || {});
+      console.log('  ' + C.purple('⚡ ' + name) + ' ' + C.dim(truncateText(detail, 160)));
+      break;
+    }
+
+    case 'observation': {
+      const out = String(data.output || '').trim();
+      const all = out.split('\n');
+      const ok = data.ok !== false;
+      console.log('  ' + (ok ? C.green('✓ ') : C.red('✗ ')) + C.dim(`[${data.evidence || '?'}] ${data.tool || ''}${data.exit_code !== undefined ? ` · exit ${data.exit_code}` : ''}`));
+      all.slice(0, 6).forEach(line => console.log('  ' + C.darkDim('│ ') + C.dim(truncateText(line, 160))));
+      if (all.length > 6) console.log('  ' + C.darkDim('│ ') + C.dim(`… ${all.length - 6} more line(s)`));
+      break;
+    }
+
+    case 'grounding_audit': {
+      const codes = [...new Set((data.violations || []).map(v => v.code))].join(', ');
+      console.log('  ' + C.amber(`⚠ grounding: blocked ${(data.violations || []).length} unverified claim(s) — repair ${data.attempt}/${data.max_repairs}`) + C.dim(codes ? ` · ${codes}` : ''));
+      break;
+    }
+
+    case 'grounding_warning':
+      console.log('  ' + C.red(`⚠ unverified: ${(data.violations || []).length} claim(s) shipped with a GROUNDING AUDIT footer`));
+      break;
+
+    case 'loop_guard':
+      console.log('  ' + C.amber(`↻ duplicate ${data.tool} call suppressed (receipt ${data.receipt || 'n/a'})`));
+      break;
+
+    case 'hitl_intercept':
+      console.log('  ' + C.amber(`⚠ HITL: auto-approving ${data.tool} (use the TUI for interactive approval)`));
+      break;
+
+    case 'error':
+      console.log('  ' + C.red(`✖ ${data.error || 'stream error'}`));
+      break;
+
+    default:
+      break;
+  }
+}
 function startAgySession({ agent, port, ask, commands, getAgentInfo }) {
   let activeAgent = agent || 'dev-bot';
   let activeModel = 'glm-5.3-flash:cloud';
@@ -409,5 +468,8 @@ module.exports = {
   printAgyBanner,
   formatMarkdown,
   printAgentResponse,
+  printAnswerOnly,
+  printStreamEvent,
+  printThought,
   C
 };

@@ -99,6 +99,105 @@ async function askAgent(agentId, message) {
   return res;
 }
 
+// Auto-approve a HITL breakpoint for the streaming CLI (the TUI has real approval)
+function approveHitl() {
+  try {
+    const body = JSON.stringify({ verdict: 'approve' });
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: PORT,
+      path: '/hitl/verdict',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    });
+    req.on('error', () => {});
+    req.write(body);
+    req.end();
+  } catch { /* ignore */ }
+}
+
+/**
+ * Stream a turn over SSE so reasoning, tool calls and observations render as they happen.
+ * Resolves with the final payload (trace emptied — it was already rendered live).
+ */
+function askAgentStream(agentId, message) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({ agentId, message });
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: PORT,
+        path: '/chat/stream',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+        timeout: 600000
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          reject(new Error(`Daemon returned HTTP ${res.statusCode}`));
+          return;
+        }
+
+        res.setEncoding('utf8');
+        let buffer = '';
+        let finalData = null;
+        let streamError = null;
+
+        res.on('data', (chunk) => {
+          buffer += chunk;
+          let sep;
+          while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            const block = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+
+            let event = 'message';
+            const dataLines = [];
+            for (const line of block.split('\n')) {
+              if (line.startsWith('event:')) event = line.slice(6).trim();
+              else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+            }
+            if (!dataLines.length) continue;
+
+            let data;
+            try {
+              data = JSON.parse(dataLines.join('\n'));
+            } catch {
+              continue;
+            }
+
+            if (event === 'final') finalData = data;
+            else if (event === 'error') streamError = data.error || 'stream error';
+            else {
+              ui.printStreamEvent(event, data);
+              if (event === 'hitl_intercept') approveHitl();
+            }
+          }
+        });
+
+        res.on('end', () => {
+          if (finalData) resolve({ ...finalData, trace: [] });
+          else reject(new Error(streamError || 'Stream ended without a final answer'));
+        });
+      }
+    );
+
+    req.on('timeout', () => req.destroy(new Error('Daemon request timed out')));
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+async function askAgentSmart(agentId, message) {
+  try {
+    return await askAgentStream(agentId, message);
+  } catch (err) {
+    console.log(C.dim(`  (live stream unavailable: ${err.message}; falling back to batch mode)`));
+    return await askAgent(agentId, message);
+  }
+}
+
 // Retrieve primary agent
 async function getPrimaryAgent() {
   try {
@@ -260,7 +359,7 @@ async function runInteractive(targetAgent) {
     ui.startAgySession({
       agent: agentId,
       port: PORT,
-      ask: (msg) => askAgent(agentId, msg),
+      ask: (msg) => askAgentSmart(agentId, msg),
       commands: getSlashCommands()
     });
   } catch (err) {
@@ -335,8 +434,8 @@ program
       const message = (words || []).join(' ');
 
       if (message) {
-        // One-shot execution with formatting
-        const res = await askAgent(targetAgent, message);
+        // One-shot execution: stream reasoning/tools live, then the answer
+        const res = await askAgentSmart(targetAgent, message);
         ui.printAgentResponse(targetAgent, res);
       } else {
         // Interactive session
