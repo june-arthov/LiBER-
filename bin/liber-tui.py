@@ -341,16 +341,13 @@ class LiberApp(App):
                 (" Daemon is offline on port 4567. Run 'liber spawn' in terminal or wait for auto-spawn...", "dim #F59E0B")
             )
         )
-                (" Daemon belum aktif pada port 4567. Jalankan `liber spawn` di terminal lain atau tunggu auto-spawn...", "dim #F59E0B")
-            )
-        )
 
     # -----------------------------------------------------------------
     # Event-Driven Backend Streaming Queue
     # -----------------------------------------------------------------
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Dipanggil saat operator mengetik instruksi dan menekan Enter."""
+        """Triggered when the operator submits an instruction in the prompt bar."""
         prompt = event.value.strip()
         if not prompt or self.agent_busy:
             return
@@ -359,12 +356,12 @@ class LiberApp(App):
         asyncio.create_task(self.dispatch_agent_cycle(prompt))
 
     async def dispatch_agent_cycle(self, prompt: str) -> None:
-        """Menghubungkan prompt ke backend engine SSE stream sesungguhnya."""
+        """Connects prompt to backend engine real-time SSE stream."""
         self.agent_busy = True
         self.header_widget.state_label = "EXECUTING"
         self.query_one("#stream-pane").styles.border = ("round", "#00F0FF")
 
-        # Tampilkan prompt operator di log
+        # Display operator prompt in log stream
         self.log_widget.write(
             Text.assemble(
                 LiberCue.badge("OPERATOR", "black on #00F0FF"),
