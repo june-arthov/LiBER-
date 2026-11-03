@@ -1,0 +1,46 @@
+=== LIBER — VARIAN GAYA ASCII ===
+
+[1] GAYA GARIS (BOX / OUTLINE)
+┌────────────────────────────────────────┐
+│                                        │
+│   L   I   B   E   R                    │
+│   ─────────────────────────            │
+│   baca · bukti · lapor                 │
+│                                        │
+└────────────────────────────────────────┘
+
+[2] GAYA TIPIS (THIN / ROUNDED)
+╭──────────────────────────────╮
+│  L I B E R                   │
+│  ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈       │
+│  verify-first                │
+╰──────────────────────────────╯
+
+[3] GAYA MINIMAL
+· · · L I B E R · · ·
+       ───────
+       no claim
+       without
+       a receipt
+
+[4] GAYA LOG / TERMINAL
+$ liber --self
+[ ok ] baca         2 file
+[ ok ] patch        1 blok
+[ ok ] baca ulang   terverifikasi
+[ .. ] klaim kosong → ditolak
+$ _
+
+[5] GAYA BLOK PADAT
+█   █  █████  ████   █████  ████
+█   █  █   █  █   █  █      █   █
+█   █  █████  ████   ████   ████
+█   █  █   █  █   █  █      █  █
+█████  █████  ████   █████  █   ██
+
+[6] GAYA WAJAH — "cara aku melihat kerja"
+      ╔════════════════════════════════════╗
+      ║      ◉                      ◉      ║
+      ║              ╲______╱              ║
+      ║    ◂  BACA · BUKTI · LAPOR  ▸      ║
+      ╚════════════════════════════════════╝

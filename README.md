@@ -53,9 +53,16 @@ npm install
 npm link
 ```
 
-> **Linux/WSL:** `npm link` writes a symlink into `/usr/lib/node_modules` and fails
-> with `EACCES` as a normal user — run `sudo npm link`, or skip linking entirely and
-> start the CLI with `node bin/liber` (everything else works the same).
+> **Linux/WSL: use the full setup script** — it handles the pieces `npm link`
+> needs sudo for, creates an isolated `.venv` for the Python TUI (textual + httpx),
+> and copies `.env` from the template:
+>
+> ```bash
+> bash scripts/setup.sh
+> ```
+>
+> Manual fallback: `sudo npm link` (or run `node bin/liber` without linking) and
+> `python3 -m pip install --user textual httpx` for the TUI.
 
 *(Optional Python TUI dependencies)*
 ```bash

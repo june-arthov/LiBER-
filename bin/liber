@@ -656,8 +656,26 @@ program
   .description('Launch the Tactical Cyber-Obsidian Textual TUI dashboard')
   .action(() => {
     const pythonScript = path.join(ROOT, 'bin', 'liber-tui.py');
+    const candidates = [
+      process.env.LIBER_PYTHON,
+      path.join(ROOT, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python'),
+      'python3',
+      'python'
+    ].filter(Boolean);
+
     if (fs.existsSync(pythonScript)) {
-      spawn('python', [pythonScript], { stdio: 'inherit' });
+      const python = candidates.find(p => {
+        if (p.includes(path.sep)) return fs.existsSync(p);
+        try { require('child_process').execSync(`"${p}" -c "import sys"`, { stdio: 'ignore' }); return true; }
+        catch { return false; }
+      });
+
+      if (!python) {
+        console.error(`${C.red('✖ No Python interpreter found for the TUI.')}`);
+        console.error(C.dim('  Install python3 and run: bash scripts/setup.sh  (it creates .venv with textual + httpx)'));
+        process.exit(1);
+      }
+      spawn(python, [pythonScript], { stdio: 'inherit' });
     } else {
       spawn(process.execPath, [path.join(ROOT, 'bin', 'liber-tui')], { stdio: 'inherit' });
     }
