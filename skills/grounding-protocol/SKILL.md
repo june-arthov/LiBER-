@@ -1,3 +1,9 @@
+---
+name: grounding-protocol
+description: How to phrase claims so the delivery audit passes — which claims need receipts, which are free, and how to report results.
+always: true
+triggers: []
+---
 # GROUNDING PROTOCOL — How to Answer So the Audit Passes
 
 Before writing a sentence that asserts something, ask: which receipt proves it?

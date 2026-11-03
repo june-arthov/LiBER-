@@ -1,3 +1,9 @@
+---
+name: instruction-fidelity
+description: Use when the request carries hard constraints — exact formats, required files, forbidden actions, or a multi-item checklist.
+always: false
+triggers: [exact, must, required, constraint, format, only, "don't", "do not", jangan, harus, hanya, semua, all, every, each]
+---
 # INSTRUCTION FIDELITY — Answer the Question That Was Asked
 
 Before acting, extract the acceptance criteria from the user's request:

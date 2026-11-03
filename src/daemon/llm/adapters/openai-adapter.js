@@ -21,6 +21,7 @@ class OpenAIAdapter extends LLMAdapter {
     if (!response.ok || !data.choices) {
       throw new Error('HTTP ' + response.status + ': ' + (data.error?.message || data.error || response.statusText));
     }
+    this.lastUsage = data.usage || null;
     return data.choices[0].message.content;
   }
 

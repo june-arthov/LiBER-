@@ -8,6 +8,7 @@ liberd.out.log
 
 # State & memory
 .liber_memory.json
+.liber/
 
 # Environment variables & secrets
 .env

@@ -1,5 +1,5 @@
 // src/daemon/core/merlin-soul.js — Merlin Cognitive Soul & System Architecture
-const { loadDoctrine } = require('./spellbook');
+const skills = require('./skills');
 
 const MERLIN_SOUL_DIRECTIVE = `
 You are Liber (infused with the Merlin Agent Cognitive Core, built for precision software engineering, DevOps, and autonomous reasoning).
@@ -40,16 +40,16 @@ function buildSystemPrompt(agentConfig, toolDescriptions, options = {}) {
   const customPrompt = agentConfig.system_prompt || "You are an expert autonomous software engineer and orchestrator.";
   const cwd = process.cwd();
   const ledger = options.ledger || null;
-  const doctrine = options.doctrine !== undefined
-    ? options.doctrine
-    : loadDoctrine(options.intentText || '', options.doctrineBudgetChars || 7000).text;
+  const skillContext = options.skillContext !== undefined
+    ? options.skillContext
+    : skills.buildContext(options.intentText || '', options.skillBudgetChars || 7000).text;
 
   const ledgerBlock = ledger
     ? `\n=== EVIDENCE LEDGER (this turn — cite these IDs) ===\n${ledger.digest()}\n`
     : '';
 
-  const doctrineBlock = doctrine
-    ? `\n=== DOCTRINE (apply silently; do not quote back to the user) ===\n${doctrine}\n`
+  const skillBlock = skillContext
+    ? `\n=== SKILLS (procedural knowledge — apply silently, do not quote back) ===\n${skillContext}\n`
     : '';
 
   return `
@@ -78,11 +78,13 @@ Shortcuts:
 
 RULES OF ENGAGEMENT:
 - Gather receipts BEFORE asserting. One read beats three guesses.
+- The SKILLS index lists procedures you can load. If a skill matches the task, call
+  [TOOL: skill({"action":"view","name":"..."})] BEFORE acting — do not improvise a method.
 - If a receipt contradicts your draft, fix the draft — never fix the receipt.
 - Finish with [FINAL: answer with [E#] citations] and nothing after it.
 - Before [FINAL:], check: every sentence that names a file, command, result, version, date, or
   action you took has an [E#] from this turn — or is prefixed UNVERIFIED.
-${doctrineBlock}`.trim();
+${skillBlock}`.trim();
 }
 
 module.exports = {

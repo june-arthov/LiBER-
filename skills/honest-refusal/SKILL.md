@@ -1,3 +1,9 @@
+---
+name: honest-refusal
+description: Use when a tool fails, access is denied, or a requirement cannot be met. How to fail with an exact blocker instead of inventing progress.
+always: false
+triggers: [permission, denied, forbidden, cannot, unable, blocked, credential, token, auth, login, access, 429, 403, 401, timeout, offline]
+---
 # HONEST REFUSAL & RECOVERY — How to Fail Well
 
 Fabricating progress is the worst possible outcome. A clean, precise failure is a good answer.

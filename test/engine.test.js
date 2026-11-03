@@ -21,7 +21,7 @@ function cfg(overrides = {}) {
       max_repairs: 2,
       require_readback: true,
       require_citations: true,
-      doctrine_budget_chars: 4000,
+      doctrine_budget_chars: 7000,
       ...overrides
     }
   };
@@ -218,4 +218,24 @@ test('duplicate identical tool calls are suppressed to break loops', async () =>
   });
   assert.equal(res.grounding.ledger.receipts.length, 2, 'third and later identical calls must not execute');
   assert.equal(res.grounding.status, 'INCOMPLETE');
+});
+
+test('the model can load a skill through the skill tool', async () => {
+  const llm = scripted([
+    '[TOOL: skill({"action": "view", "name": "systematic-debugging"})]',
+    '[FINAL: Loaded the debugging procedure [E1].]'
+  ]);
+  const res = await engine.runTurn({
+    agentId: 't-skill',
+    agentConfig: cfg(),
+    userMessage: 'load the debugging skill',
+    memory,
+    llmManager: llm,
+    onEvent: () => {},
+    maxLoops: 5
+  });
+
+  assert.equal(res.grounding.ledger.receipts[0].tool, 'skill');
+  assert.equal(res.grounding.ledger.receipts[0].ok, true);
+  assert.equal(res.grounding.status, 'PASS', JSON.stringify(res.grounding.violations));
 });

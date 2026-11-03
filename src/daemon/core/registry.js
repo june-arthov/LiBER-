@@ -4,6 +4,7 @@ const { runTerminal, isCommandSensitive } = require('./tools/terminal-tool');
 const { manageTodo } = require('./tools/todo-tool');
 const { manageMemory } = require('./tools/memory-tool');
 const { fetchUrl } = require('./tools/web-tool');
+const { manageSkill, ACTIONS: SKILL_ACTIONS } = require('./tools/skill-tool');
 const { validateArgs } = require('./validate');
 
 class ToolRegistry {
@@ -142,6 +143,28 @@ class ToolRegistry {
         required: ['url']
       },
       handler: fetchUrl
+    });
+
+    // 9. skill — progressive-disclosure procedure library
+    this.register({
+      name: 'skill',
+      description: 'List, search, view, create or update procedural skills. Load a matching skill BEFORE acting instead of improvising a method.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: SKILL_ACTIONS, description: 'list | view | search | create | update' },
+          name: { type: 'string', description: 'Skill name (view/create/update)' },
+          query: { type: 'string', description: 'Search text (search)' },
+          description: { type: 'string', description: 'One-line "Use when ..." description (create/update)' },
+          body: { type: 'string', description: 'Full markdown procedure (create/update)' },
+          triggers: { type: 'array', description: 'Keywords that auto-select this skill' },
+          always: { type: 'boolean', description: 'Inject the body every turn (use sparingly)' },
+          overwrite: { type: 'boolean', description: 'Allow replacing an existing skill' }
+        },
+        required: ['action']
+      },
+      handler: manageSkill,
+      isSensitiveCheck: (args) => ['create', 'update'].includes(String(args.action || '').toLowerCase())
     });
   }
 

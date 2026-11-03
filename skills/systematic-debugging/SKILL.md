@@ -1,3 +1,9 @@
+---
+name: systematic-debugging
+description: Use when a bug, crash, failing test, or regression must be diagnosed. Four phases with a tight feedback loop before any fix.
+always: false
+triggers: [bug, error, fail, crash, broken, regression, debug, traceback, exception, rusak, gagal, tidak jalan]
+---
 # SYSTEMATIC DEBUGGING — Root Cause Before Fix
 
 Iron rule: no fix without root-cause investigation. A patch that hides a symptom is a second bug.

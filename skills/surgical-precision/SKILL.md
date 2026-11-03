@@ -1,3 +1,9 @@
+---
+name: surgical-precision
+description: Use when editing existing code or config. Read before edit, patch instead of rewrite, preserve identifiers, minimal diffs.
+always: false
+triggers: [file, code, function, class, module, refactor, rename, move, patch, edit, config, yaml, json]
+---
 # SURGICAL PRECISION — Change Only What Must Change
 
 - Read a file before editing it; read the exact region before patching it.

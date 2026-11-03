@@ -5,7 +5,7 @@ const logger = require('../../utils/logger');
 const { buildSystemPrompt } = require('./merlin-soul');
 const { EvidenceLedger } = require('./evidence');
 const grounding = require('./grounding');
-const { loadDoctrine } = require('./spellbook');
+const skills = require('./skills');
 
 const DEFAULT_GROUNDING = {
   enabled: true,
@@ -121,8 +121,12 @@ class MerlinEngine {
     const middle = messages.slice(1, -6);
 
     const summaryContent = middle
-      .filter(m => m.role === 'user' || (m.role === 'assistant' && !String(m.content).includes('[TOOL:')))
-      .map(m => `${m.role.toUpperCase()}: ${String(m.content).slice(0, 140)}`)
+      .map(m => {
+        const text = String(m.content || '');
+        if (m.role === 'user' && text.startsWith('OBSERVATION')) return `TOOL: ${text.slice(0, 200)}`;
+        if (text.startsWith('GROUNDING AUDIT') || text.startsWith('DUPLICATE CALL')) return `SYSTEM: ${text.slice(0, 160)}`;
+        return `${m.role.toUpperCase()}: ${text.slice(0, 160)}`;
+      })
       .join(' | ');
 
     const summaryMessage = {
@@ -145,7 +149,7 @@ class MerlinEngine {
   }) {
     const cfg = { ...DEFAULT_GROUNDING, ...(agentConfig.grounding || {}) };
     const ledger = new EvidenceLedger(agentId);
-    const doctrine = loadDoctrine(String(userMessage || ''), cfg.doctrine_budget_chars);
+    const skillCtx = skills.buildContext(String(userMessage || ''), cfg.doctrine_budget_chars);
 
     circuitBreaker.configureLimit(agentId, maxLoops);
     circuitBreaker.reset(agentId);
@@ -163,13 +167,14 @@ class MerlinEngine {
     const trace = [];
     const requestStartTime = Date.now();
     const callCounts = new Map();
+    const usageTotals = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
     onEvent('start', {
       agentId,
       model: agentConfig.engine?.model,
       grounding: !!cfg.enabled,
       max_loops: maxLoops,
-      doctrine: doctrine.used
+      skills: skillCtx.used
     });
 
     while (iteration < maxLoops) {
@@ -179,7 +184,7 @@ class MerlinEngine {
 
       const systemContent = buildSystemPrompt(agentConfig, registry.getToolDescription(), {
         ledger,
-        doctrine: doctrine.text
+        skillContext: skillCtx.text
       });
       if (messages[0] && messages[0].role === 'system') messages[0] = { role: 'system', content: systemContent };
       else messages.unshift({ role: 'system', content: systemContent });
@@ -204,10 +209,18 @@ class MerlinEngine {
         response = `Error: LLM provider unavailable (${err.message})`;
       }
       const llmMs = Math.max(1, Date.now() - llmStart);
+      const usage = typeof llmManager.getLastUsage === 'function' ? llmManager.getLastUsage() : null;
+      if (usage) {
+        usageTotals.prompt_tokens += Number(usage.prompt_tokens || 0);
+        usageTotals.completion_tokens += Number(usage.completion_tokens || 0);
+        usageTotals.total_tokens += Number(usage.total_tokens || 0);
+      }
       onEvent('telemetry', {
         // Measured, not invented: estimated output tokens / real wall time.
         tok_speed: parseFloat(((String(response).length / 4) / (llmMs / 1000)).toFixed(1)),
-        latency_ms: llmMs
+        latency_ms: llmMs,
+        prompt_tokens: usage?.prompt_tokens ?? null,
+        completion_tokens: usage?.completion_tokens ?? null
       });
 
       const thought = this.extractThought(response);
@@ -380,10 +393,22 @@ class MerlinEngine {
       repairs
     });
 
+    const priceIn = Number(agentConfig.engine?.price_in_per_1k);
+    const priceOut = Number(agentConfig.engine?.price_out_per_1k);
+    const usageReport = (usageTotals.total_tokens > 0 || usageTotals.prompt_tokens > 0)
+      ? {
+          ...usageTotals,
+          cost_estimate: Number.isFinite(priceIn) && Number.isFinite(priceOut)
+            ? +((usageTotals.prompt_tokens / 1000) * priceIn + (usageTotals.completion_tokens / 1000) * priceOut).toFixed(6)
+            : null
+        }
+      : null;
+
     const resultPayload = {
       success: true,
       response: finalResponse,
       grounded: auditResult ? auditResult.passed : null,
+      usage: usageReport,
       trace,
       durationMs: Date.now() - requestStartTime,
       iterations: iteration,

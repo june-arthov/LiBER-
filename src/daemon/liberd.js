@@ -6,6 +6,7 @@ const merlinEngine = require('./core/engine');
 const memory = require('./core/memory');
 const registry = require('./core/registry');
 const circuitBreaker = require('./core/circuit-breaker');
+const trace = require('./core/trace');
 const logger = require('../utils/logger');
 
 class LiberDaemon {
@@ -80,9 +81,18 @@ class LiberDaemon {
       llmManager.initialize(config.agent.engine);
 
       this.maxLoops = config.limits?.circuit_breaker?.max_loops || 12;
+      if (config.memory?.persist !== false) {
+        memory.attach(config.memory?.path || '.liber/session.json', config.memory?.window_size);
+      }
+      this.traceEnabled = config.telemetry?.trace !== false;
+
       const agentId = config.agent.name || 'default-agent';
       this.agents.set(agentId, {
-        config: { ...config.agent, grounding: config.grounding || {} },
+        config: {
+          ...config.agent,
+          grounding: config.grounding || {},
+          skills: config.skills || {}
+        },
         status: 'RUNNING',
         startTime: Date.now(),
         metrics: { tokens: 0, requests: 0 }
@@ -129,6 +139,10 @@ class LiberDaemon {
       else if (endpoint === '/shutdown') {
         res.end(JSON.stringify({ success: true }));
         setTimeout(() => { this.stop(); process.exit(0); }, 100);
+      }
+      else if (endpoint === '/session/clear') {
+        memory.clearAll();
+        res.end(JSON.stringify({ success: true, cleared: true }));
       }
       else if (endpoint === '/hitl/verdict') {
         let body = '';
@@ -179,7 +193,7 @@ class LiberDaemon {
 
         const agent = this.agents.get(agentId);
         try {
-          await merlinEngine.runTurn({
+          const result = await merlinEngine.runTurn({
             agentId,
             agentConfig: agent.config,
             userMessage: message,
@@ -189,6 +203,9 @@ class LiberDaemon {
             waitForHitl: (aid, toolName, args) => this.waitForHitl(aid, `${toolName}: ${JSON.stringify(args)}`),
             maxLoops: this.maxLoops
           });
+          if (this.traceEnabled) {
+            trace.appendTurn({ agentId, userMessage: message, result, model: agent.config.engine?.model });
+          }
         } catch (err) {
           sendEvent('error', { error: err.message });
         }
@@ -211,6 +228,10 @@ class LiberDaemon {
           waitForHitl: () => Promise.resolve(true),
           maxLoops: this.maxLoops
         });
+
+        if (this.traceEnabled) {
+          trace.appendTurn({ agentId, userMessage: message, result, model: agent.config.engine?.model });
+        }
 
         res.end(JSON.stringify(result));
       } 

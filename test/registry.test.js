@@ -60,3 +60,12 @@ test('fetch_url is registered and validates its url', async () => {
   const res = await registry.execute('fetch_url', { url: 'ftp://example.com/x' });
   assert.match(res.error, /Unsupported protocol/);
 });
+
+test('skill definitions are registered and only writes require approval', () => {
+  const tool = registry.get('skill');
+  assert.ok(tool);
+  assert.equal(registry.isSensitive('skill', { action: 'view' }), false);
+  assert.equal(registry.isSensitive('skill', { action: 'list' }), false);
+  assert.equal(registry.isSensitive('skill', { action: 'create' }), true);
+  assert.equal(registry.isSensitive('skill', { action: 'update' }), true);
+});

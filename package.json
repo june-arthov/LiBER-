@@ -1,8 +1,11 @@
 {
   "name": "liber",
-  "version": "0.3.0",
-  "description": "LiBER — autonomous agent orchestrator with a machine-enforced grounding gate",
-  "bin": { "liber": "bin/liber", "liberd": "bin/liberd-entry" },
+  "version": "0.4.0",
+  "description": "LiBER — autonomous agent orchestrator with a machine-enforced grounding gate and a skill library",
+  "bin": {
+    "liber": "bin/liber",
+    "liberd": "bin/liberd-entry"
+  },
   "scripts": {
     "test": "node --test",
     "start": "node bin/liber",

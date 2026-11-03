@@ -120,17 +120,45 @@ mechanically on every turn:
    success cannot be claimed until the file is read back or a test/build runs green.
 5. **Argument validation** — tool calls are validated against their schema before execution;
    missing, typo'd or ill-typed arguments are rejected and fed back, never executed.
-6. **Doctrine** — the distilled Merlin method (`src/daemon/spellbook/*.md`) is injected by intent:
-   iron law, grounding, systematic debugging, verification-first, surgical precision, honest
-   refusal, instruction fidelity. Inspect it with `liber doctrine`.
+6. **Skills** — a real procedural library: `skills/<name>/SKILL.md` (global) and
+   `.liber/skills/` (per project). The prompt carries a cheap index plus the always-on core
+   procedures; the model loads a body with the `skill` tool, and matching triggers auto-select
+   one for the task. Inspect with `liber skills [name]`.
 
 **What it guarantees:** no unverified claim is delivered as verified fact — every auditable claim
 is bound to a real receipt or explicitly labelled UNVERIFIED. It does not make the model
 omniscient: receipt binding is syntactic (the claim cited *a* real receipt), so the doctrine still
 obliges the model to cite the receipt that actually proves the claim.
 
-Run the enforcement suite with `npm test` (45 tests, including a scripted model that hallucinates,
+Run the enforcement suite with `npm test` (62 tests, including a scripted model that hallucinates,
 gets blocked, and is forced to read the file before answering).
+
+## 📚 Skill Library
+
+Skills are procedures, not prompt text: each one is a `SKILL.md` with a one-line "use when"
+description, optional triggers, and a body. They are discovered at boot, indexed cheaply, and
+loaded only when needed.
+
+- **Global** — `skills/<name>/SKILL.md` (shipped with Liber).
+- **Project** — `.liber/skills/<name>/SKILL.md` (overrides a global skill of the same name).
+- **On demand** — `[TOOL: skill({"action":"view","name":"..."})]`; `list` / `search` also available.
+- **Auto-select** — a trigger match injects the body for that turn.
+- **Authoring** — `skill` action `create`/`update` writes to `.liber/skills/` and requires HITL approval.
+- **Attachments** — `references/`, `scripts/`, `templates/` next to `SKILL.md` are listed by `view`.
+
+Shipped skills: `iron-law` (always), `grounding-protocol` (always), `systematic-debugging`,
+`verification-first`, `surgical-precision`, `honest-refusal`, `instruction-fidelity`,
+`codebase-orientation`, `performance-triage`.
+
+## ⚙️ Harness Capabilities
+
+| Capability | Behaviour |
+|---|---|
+| Retry with backoff | 429/5xx/timeout are retried up to `retry_attempts` (default 3); auth/4xx errors are never retried. |
+| Session persistence | The conversation window survives daemon restarts in `.liber/session.json` (`liber reset` clears it). |
+| Trace audit | Every completed turn appends one JSONL record to `.liber/traces/YYYY-MM-DD.jsonl`. |
+| Real usage | Provider `usage` is reported per turn; `cost_estimate` appears only when prices are configured. |
+| Loop guard | Identical repeated tool calls are suppressed after two attempts and the model is forced to answer or declare the gap. |
 
 ## 🛡️ Human-In-The-Loop (HITL) Safety
 

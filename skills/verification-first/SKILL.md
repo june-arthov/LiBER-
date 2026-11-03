@@ -1,3 +1,9 @@
+---
+name: verification-first
+description: Use before claiming any task is done. Defines the exact proof required per action type and bans unsupported success language.
+always: false
+triggers: [write, edit, fix, patch, implement, build, compile, deploy, release, install, test, verify, run, refactor, migrate, upgrade, done, selesai]
+---
 # VERIFICATION-FIRST — What "Done" Actually Requires
 
 "Done" is never a feeling. It is a receipt.

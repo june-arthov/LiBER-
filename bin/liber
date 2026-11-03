@@ -166,21 +166,34 @@ function getSlashCommands() {
       lines.push(C.darkDim('  ╰─' + '─'.repeat(58) + '╯\n'));
       return lines.join('\n');
     },
-    doctrine: async () => {
-      const { loadAll, MODULES } = require(path.join(ROOT, 'src', 'daemon', 'core', 'spellbook'));
-      const modules = loadAll();
+    skills: async (name) => {
+      const skillLib = require(path.join(ROOT, 'src', 'daemon', 'core', 'skills'));
+      if (name && name.trim()) {
+        const v = skillLib.view(name.trim());
+        if (v.error) return `\n  ${C.red('✖')} ${v.error}\n`;
+        const lines = [];
+        lines.push('');
+        lines.push('  ' + C.badgePurple(v.name.toUpperCase()) + ' ' + C.dim(`${v.source} · ${v.always ? 'always-on' : 'on-demand'}`));
+        if (v.description) lines.push('  ' + C.dim(v.description));
+        if (v.triggers.length) lines.push('  ' + C.dim('triggers: ') + C.sky(v.triggers.join(', ')));
+        if (v.files.length) lines.push('  ' + C.dim('files: ') + C.sky(v.files.join(', ')));
+        lines.push('');
+        lines.push(ui.formatMarkdown(v.body));
+        lines.push('');
+        return lines.join('\n');
+      }
+      const all = skillLib.scan();
       const lines = [];
       lines.push('');
-      lines.push(C.darkDim('  ╭─ ') + C.purple(C.bold('MERLIN SPELLBOOK · DOCTRINE')) + C.darkDim(' ───────────────────────╮'));
-      lines.push('  ' + C.darkDim('│ ') + C.dim('Grounding gate: ') + C.green('ENABLED') + C.dim('  ·  audit + repair + read-back'));
+      lines.push(C.darkDim('  ╭─ ') + C.purple(C.bold('LIBER SKILLS')) + C.darkDim(' ────────────────────────────────╮'));
+      lines.push('  ' + C.darkDim('│ ') + C.dim(`${all.length} skills · index always in prompt · bodies loaded on demand`));
       lines.push('  ' + C.darkDim('├─' + '─'.repeat(58) + '┤'));
-      modules.forEach((m) => {
-        const def = MODULES.find(x => x.id === m.id) || {};
-        const tag = def.always ? C.green('ALWAYS') : C.amber('INTENT');
-        lines.push('  ' + C.darkDim('│ ') + C.sky(m.id.padEnd(14)) + tag + ' '.repeat(10) + C.dim(`${m.chars} chars`));
+      all.forEach((s) => {
+        const tag = s.always ? C.green('ALWAYS') : C.amber('LOAD  ');
+        lines.push('  ' + C.darkDim('│ ') + C.sky(s.name.padEnd(22)) + tag + ' ' + C.dim(s.description.slice(0, 60)));
       });
       lines.push('  ' + C.darkDim('├─' + '─'.repeat(58) + '┤'));
-      lines.push('  ' + C.darkDim('│ ') + C.dim('Every claim audited against tool receipts · unresolved → GROUNDING AUDIT'));
+      lines.push('  ' + C.darkDim('│ ') + C.dim('View: ') + C.amber('/skills <name>') + C.dim('  ·  Project skills: ') + C.dim('.liber/skills/'));
       lines.push(C.darkDim('  ╰─' + '─'.repeat(58) + '╯\n'));
       return lines.join('\n');
     },
@@ -366,12 +379,34 @@ program
     console.log(logsOutput);
   });
 
-// COMMAND: doctrine
+// COMMAND: skills
+program
+  .command('skills [name]')
+  .alias('skill')
+  .description('List procedural skills or print one skill body')
+  .action(async (name) => {
+    console.log(await getSlashCommands().skills(name));
+  });
+
+// COMMAND: doctrine (backward-compatible alias)
 program
   .command('doctrine')
-  .description('Show the Merlin spellbook modules enforced by the grounding gate')
+  .description('Alias of `liber skills`')
   .action(async () => {
-    console.log(await getSlashCommands().doctrine());
+    console.log(await getSlashCommands().skills());
+  });
+
+// COMMAND: reset (clear persisted session window)
+program
+  .command('reset')
+  .description('Clear the persisted conversation window for all agents')
+  .action(async () => {
+    try {
+      await requestDaemon('/session/clear', 'POST', {});
+      console.log(`${C.green('✔')} Session memory cleared.`);
+    } catch (err) {
+      console.log(C.dim(`Daemon not reachable: ${err.message}`));
+    }
   });
 
 // COMMAND: tui
