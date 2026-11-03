@@ -165,7 +165,7 @@
   }
   .overlay.open { display: flex; }
   .settings {
-    width: 560px; max-height: 86vh; overflow-y: auto;
+    width: 640px; max-height: 86vh; overflow-y: auto;
     background: var(--panel); border: 1px solid var(--border-strong);
     border-radius: 10px; padding: 0; box-shadow: 0 18px 50px rgba(0,0,0,.5);
   }
@@ -659,33 +659,42 @@ function buildSettingsForm(config) {
   const m = config?.memory || {};
   const e = config?.engine || {};
   const t = config?.telemetry || {};
+  const pol = config?.policy?.terminal || {};
 
+  sec(body, 'Model');
   body.appendChild(field('Provider', `<select id="s-provider"><option value="openai">openai (OpenAI-compatible)</option><option value="anthropic">anthropic</option><option value="gemini">gemini</option><option value="ollama">ollama (local)</option></select>`));
   body.appendChild(field('Model', `<input type="text" id="s-model" value="${esc(e.model || '')}">`));
   body.appendChild(field('Endpoint', `<input type="text" id="s-endpoint" value="${esc(e.endpoint || '')}">`));
+  body.appendChild(field('Context window (override)', `<input type="number" id="s-ctx" min="0" step="1000" placeholder="0 = use detected">`));
 
-  const sec = (t2) => { const d = document.createElement('div'); d.className = 'sec'; d.textContent = t2; body.appendChild(d); };
-
-  sec('Grounding');
+  sec(body, 'Grounding');
   body.appendChild(field('Gate enabled', `<input type="checkbox" id="s-g-enabled">`));
   body.appendChild(field('Max repairs', `<input type="number" id="s-g-repairs" min="0" max="5">`));
   body.appendChild(field('Require read-back', `<input type="checkbox" id="s-g-readback">`));
   body.appendChild(field('Require citations', `<input type="checkbox" id="s-g-citations">`));
   body.appendChild(field('Semantic verifier', `<input type="checkbox" id="s-g-semantic">`));
 
-  sec('Limits');
+  sec(body, 'Terminal policy');
+  body.appendChild(field('Mode', `<select id="s-p-mode"><option value="read_only">read_only — block state-changing commands</option><option value="allowlist">allowlist — only the listed prefixes</option><option value="prompt">prompt — HITL only</option></select>`));
+  body.appendChild(field('Allowlist', `<textarea id="s-p-allow" placeholder="npm test&#10;git status" title="one prefix per line"></textarea>`));
+  body.appendChild(field('Denylist', `<textarea id="s-p-deny" placeholder="shutdown&#10;format C:" title="one prefix per line"></textarea>`));
+
+  sec(body, 'Write policy');
+  body.appendChild(field('Write roots', `<textarea id="s-p-roots" placeholder="." title="one per line, relative to cwd"></textarea>`));
+
+  sec(body, 'Limits');
   body.appendChild(field('Max tokens / day', `<input type="number" id="s-l-tokens" min="0">`));
   body.appendChild(field('Max cost / day ($)', `<input type="number" id="s-l-cost" min="0" step="0.1">`));
   body.appendChild(field('Breaker max loops', `<input type="number" id="s-l-loops" min="1" max="100">`));
 
-  sec('Memory');
+  sec(body, 'Memory');
   body.appendChild(field('Window size', `<input type="number" id="s-m-window" min="1" max="200">`));
   body.appendChild(field('Persist session', `<input type="checkbox" id="s-m-persist">`));
 
-  sec('Telemetry');
+  sec(body, 'Telemetry');
   body.appendChild(field('Trace turns', `<input type="checkbox" id="s-t-trace">`));
 
-  sec('Appearance');
+  sec(body, 'Appearance');
   const sw = document.createElement('div');
   sw.className = 'field';
   sw.innerHTML = '<label>Accent color</label>';
@@ -704,6 +713,7 @@ function buildSettingsForm(config) {
 
   // values
   $('s-provider').value = e.provider || 'openai';
+  $('s-ctx').value = e.context_window_override ?? 0;
   $('s-g-enabled').checked = g.enabled !== false;
   $('s-g-repairs').value = g.max_repairs ?? 2;
   $('s-g-readback').checked = g.require_readback !== false;
@@ -715,10 +725,20 @@ function buildSettingsForm(config) {
   $('s-m-window').value = m.window_size ?? 20;
   $('s-m-persist').checked = m.persist !== false;
   $('s-t-trace').checked = t.trace !== false;
+  $('s-p-mode').value = pol.mode || 'read_only';
+  $('s-p-allow').value = (pol.allowlist || []).join('\n');
+  $('s-p-deny').value = (pol.denylist || []).join('\n');
+  $('s-p-roots').value = (config?.policy?.write_roots || ['.']).join('\n');
 
   const saved = (() => { try { return localStorage.getItem('liber-accent'); } catch { return null; } })();
-  if (saved) applyAccent(saved);
-  else applyAccent(ACCENTS[0]);
+  applyAccent(saved || ACCENTS[0]);
+}
+
+function sec(body, title) {
+  const d = document.createElement('div');
+  d.className = 'sec';
+  d.textContent = title;
+  body.appendChild(d);
 }
 
 let currentSettingsConfig = null;
@@ -740,15 +760,21 @@ function closeSettings() {
 }
 
 async function saveSettings() {
+  const lines = (id) => $(id).value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const payload = {
     'engine.provider': $('s-provider').value,
     'engine.model': $('s-model').value.trim(),
     'engine.endpoint': $('s-endpoint').value.trim(),
+    'engine.context_window_override': Number($('s-ctx').value),
     'grounding.enabled': $('s-g-enabled').checked,
     'grounding.max_repairs': Number($('s-g-repairs').value),
     'grounding.require_readback': $('s-g-readback').checked,
     'grounding.require_citations': $('s-g-citations').checked,
     'grounding.semantic_verifier': $('s-g-semantic').checked,
+    'policy.terminal.mode': $('s-p-mode').value,
+    'policy.terminal.allowlist': lines('s-p-allow'),
+    'policy.terminal.denylist': lines('s-p-deny'),
+    'policy.write_roots': lines('s-p-roots'),
     'limits.max_tokens_per_day': Number($('s-l-tokens').value),
     'limits.max_cost_per_day': Number($('s-l-cost').value),
     'limits.circuit_breaker.max_loops': Number($('s-l-loops').value),

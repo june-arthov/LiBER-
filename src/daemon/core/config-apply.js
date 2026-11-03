@@ -9,11 +9,13 @@ const SCHEMA = {
   'engine.provider': { kind: 'enum', values: PROVIDERS },
   'engine.model': { kind: 'model' },
   'engine.endpoint': { kind: 'endpoint' },
+  'engine.context_window_override': { kind: 'int', min: 0, max: 1_048_576 },
   'grounding.enabled': { kind: 'boolean' },
   'grounding.max_repairs': { kind: 'int', min: 0, max: 5 },
   'grounding.require_readback': { kind: 'boolean' },
   'grounding.require_citations': { kind: 'boolean' },
   'grounding.semantic_verifier': { kind: 'boolean' },
+  'policy.write_roots': { kind: 'string_list' },
   'policy.terminal.mode': { kind: 'enum', values: TERMINAL_MODES },
   'policy.terminal.allowlist': { kind: 'string_list' },
   'policy.terminal.denylist': { kind: 'string_list' },
@@ -122,13 +124,20 @@ function patchYamlKeys(text, changes) {
   return out;
 }
 
-/** Public config view — never exposes credentials or the system prompt. */
+/** Public view: the full effective grounding config, live. */
 function sanitizeConfig(config, traceEnabled, cwd) {
   const engine = config?.engine || {};
   return {
     agent: { name: config?.name || null, version: config?.version || null },
-    engine: { provider: engine.provider || null, model: engine.model || null, endpoint: engine.endpoint || null },
+    engine: {
+      provider: engine.provider || null,
+      model: engine.model || null,
+      endpoint: engine.endpoint || null,
+      context_window: engine.context_window || 32000,
+      context_window_override: engine.context_window_override || 0
+    },
     grounding: { ...(config?.grounding || {}) },
+    policy: sanitizePolicy(),
     limits: { ...(config?.limits || {}) },
     memory: { ...(config?.memory || {}) },
     telemetry: { trace: !!traceEnabled },
@@ -136,4 +145,18 @@ function sanitizeConfig(config, traceEnabled, cwd) {
   };
 }
 
-module.exports = { SCHEMA, validateConfigUpdate, patchYamlKey, patchYamlKeys, sanitizeConfig };
+function sanitizePolicy() {
+  try {
+    const policy = require('./policy');
+    const cur = policy.current();
+    return {
+      write_roots: cur.write_roots,
+      allow_outside_workspace: cur.allow_outside_workspace,
+      terminal: policy.terminalConfig()
+    };
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { SCHEMA, validateConfigUpdate, patchYamlKey, patchYamlKeys, sanitizeConfig, sanitizePolicy };

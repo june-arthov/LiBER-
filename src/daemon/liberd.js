@@ -182,7 +182,11 @@ class LiberDaemon {
         app: 'liber',
         version,
         cwd: process.cwd(),
-        token_path: path.join(process.cwd(), '.liber', 'daemon.token')
+        token_path: path.join(process.cwd(), '.liber', 'daemon.token'),
+        platform: process.platform,
+        arch: process.arch,
+        cpus: (require('os').cpus() || []).length,
+        user: (() => { try { return require('os').userInfo().username; } catch { return null; } })()
       }));
       return;
     }
@@ -241,6 +245,56 @@ class LiberDaemon {
         const handled = this.resolveHitl(verdict === 'approve' || verdict === true);
         res.end(JSON.stringify({ success: true, handled }));
       }
+      else if (endpoint === '/sessions') {
+        if (req.method === 'GET') {
+          const overview = {};
+          for (const [agentId, messages] of memory.history?.entries() || []) {
+            const assistant = messages.filter(m => m.role === 'assistant');
+            overview[agentId] = {
+              messages: messages.length,
+              last: assistant.length ? String(assistant[assistant.length - 1].content || '').slice(0, 80) : null
+            };
+          }
+          const persisted = {};
+          try {
+            if (memory.persistPath && fs.existsSync(memory.persistPath)) {
+              persisted.size_bytes = fs.statSync(memory.persistPath).size;
+              persisted.file = memory.persistPath;
+            }
+          } catch { /* best effort */ }
+          res.end(JSON.stringify({ success: true, sessions: overview, persisted }));
+          return;
+        }
+        if (req.method === 'DELETE') {
+          memory.clearAll();
+          res.end(JSON.stringify({ success: true, cleared: true }));
+          return;
+        }
+      }
+      else if (endpoint === '/config/backup') {
+        try {
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const outDir = path.join(process.cwd(), '.liber');
+
+          if (fs.existsSync(outDir)) {
+            for (const f of fs.readdirSync(outDir)) {
+              if (f.startsWith('liber.yaml.backup')) fs.unlinkSync(path.join(outDir, f));
+            }
+          }
+          fs.mkdirSync(outDir, { recursive: true });
+
+          const cfgPath = path.resolve(process.cwd(), process.env.LIBER_CONFIG || 'liber.yaml');
+          const target = path.join(outDir, `liber.yaml.backup-${stamp}`);
+          if (fs.existsSync(cfgPath)) {
+            fs.copyFileSync(cfgPath, target);
+          }
+          res.end(JSON.stringify({ success: true, backup: target }));
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+        return;
+      }
       else if (endpoint === '/config') {
         if (req.method === 'GET') {
           const first = Array.from(this.agents.values())[0];
@@ -254,7 +308,15 @@ class LiberDaemon {
         // POST: whitelisted live updates, applied to every agent and persisted.
         let body = '';
         for await (const chunk of req) body += chunk;
-        const { changes, error } = configApply.validateConfigUpdate(JSON.parse(body || '{}'));
+        let payload;
+        try {
+          payload = JSON.parse(body || '{}');
+        } catch {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body.' }));
+          return;
+        }
+        const { changes, error } = configApply.validateConfigUpdate(payload);
         if (error) {
           res.statusCode = 400;
           res.end(JSON.stringify({ success: false, error }));

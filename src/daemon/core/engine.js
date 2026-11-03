@@ -445,7 +445,9 @@ class LiberEngine {
       const estTokens = Math.floor(JSON.stringify(messages).length / 3.8);
       onEvent('telemetry', {
         ctx_used: estTokens,
-        ctx_total: agentConfig.engine?.context_window || 32000,
+        ctx_total: agentConfig.engine?.context_window_override > 0
+        ? agentConfig.engine.context_window_override
+        : (agentConfig.engine?.context_window || 32000),
         latency: Date.now() - requestStartTime,
         iteration: iteration + 1,
         max_iterations: maxLoops,

@@ -36,7 +36,7 @@ agent:
     # price_out_per_1k: 0.0
 
 limits:
-  max_cost_per_day: 1.0
+  max_cost_per_day: 1
   max_tokens_per_day: 2000000
   circuit_breaker:
     max_loops: 12
@@ -45,8 +45,8 @@ limits:
 # Zero-hallucination enforcement (see src/daemon/core/grounding.js)
 grounding:
   enabled: true
-  max_repairs: 2          # audit-repair rounds before an answer ships with a GROUNDING AUDIT warning
-  require_readback: true  # write_file/patch must be followed by read_file before success is claimed
+  max_repairs: 2 # audit-repair rounds before an answer ships with a GROUNDING AUDIT warning
+  require_readback: true # write_file/patch must be followed by read_file before success is claimed
   require_citations: true # every audited claim must cite an [E#] receipt
   semantic_verifier: true # second pass: does the cited receipt actually entail the claim?
   doctrine_budget_chars: 7000
@@ -73,4 +73,4 @@ memory:
   path: ".liber/session.json"
 
 telemetry:
-  trace: true             # append one JSONL record per completed turn to .liber/traces/
+  trace: true # append one JSONL record per completed turn to .liber/traces/
