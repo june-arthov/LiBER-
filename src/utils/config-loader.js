@@ -53,6 +53,14 @@ function lookup(names) {
  * Process environment always wins over .env.
  */
 function resolveApiKey(provider, endpoint) {
+  // A key stored through the UI (or imported from a CLI) wins over the
+  // environment, so the Providers page is the source of truth on this machine.
+  try {
+    const providers = require('../daemon/core/providers');
+    const stored = providers.resolveStored(provider, endpoint);
+    if (stored) return stored;
+  } catch { /* provider store unavailable: fall through to env */ }
+
   const ep = String(endpoint || '');
   for (const [re, names] of ENDPOINT_KEY_ENV) {
     if (re.test(ep)) return names.length ? lookup(names) : null;

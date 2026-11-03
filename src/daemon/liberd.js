@@ -16,6 +16,7 @@ const modelSwitch = require('./core/model-switch');
 const configApply = require('./core/config-apply');
 const workspace = require('./core/workspace');
 const skills = require('./core/skills');
+const providers = require('./core/providers');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -338,6 +339,63 @@ class LiberDaemon {
           res.end(JSON.stringify({ success: false, error: e.message }));
         }
         return;
+      }
+      else if (endpoint === '/providers') {
+        res.end(JSON.stringify({
+          success: true,
+          ...providers.status(),
+          imports: providers.imports(),
+          store: providers.storePath()
+        }));
+      }
+      else if (endpoint === '/providers/key') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { id, key } = JSON.parse(body || '{}');
+        const r = providers.setKey(id, key);
+        if (!r.ok) { res.statusCode = 400; res.end(JSON.stringify({ success: false, error: r.error })); return; }
+        res.end(JSON.stringify({ success: true, id: r.id, hint: r.hint }));
+      }
+      else if (endpoint === '/providers/clear') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { id } = JSON.parse(body || '{}');
+        const r = providers.clear(id);
+        res.end(JSON.stringify({ success: r.ok, error: r.error || null }));
+      }
+      else if (endpoint === '/providers/custom') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const r = providers.setCustom(JSON.parse(body || '{}'));
+        if (!r.ok) { res.statusCode = 400; res.end(JSON.stringify({ success: false, error: r.error })); return; }
+        res.end(JSON.stringify({ success: true, id: r.id }));
+      }
+      else if (endpoint === '/providers/test') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { id } = JSON.parse(body || '{}');
+        res.end(JSON.stringify({ success: true, result: await providers.test(id) }));
+      }
+      else if (endpoint === '/providers/import') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { id } = JSON.parse(body || '{}');
+        const r = providers.importFrom(id);
+        if (!r.ok) { res.statusCode = 400; res.end(JSON.stringify({ success: false, error: r.error })); return; }
+        res.end(JSON.stringify({ success: true, imported: r.id, via: r.via, hint: r.hint, expires_at: r.expires_at }));
+      }
+      else if (endpoint === '/providers/oauth/start') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const r = await providers.deviceStart(JSON.parse(body || '{}'));
+        if (!r.ok) { res.statusCode = 400; res.end(JSON.stringify({ success: false, error: r.error })); return; }
+        res.end(JSON.stringify({ success: true, ...r }));
+      }
+      else if (endpoint === '/providers/oauth/poll') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const r = await providers.devicePoll(JSON.parse(body || '{}'));
+        res.end(JSON.stringify({ success: !!r.ok, ...r }));
       }
       else if (endpoint === '/workspace') {
         res.end(JSON.stringify({ success: true, workspace: workspace.summary(), activity: workspace.recent(20) }));

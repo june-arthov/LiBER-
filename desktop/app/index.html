@@ -1221,11 +1221,13 @@ function buildNav(){
       wrap.innerHTML=`<div class="dgroup-h"><span>${cat.icon} ${esc(cat.label)}</span><span>▾</span></div>`;
       for(const g of cat.groups){
         const it=add(wrap,'div','ditem'+(ds.cat===cat.id&&ds.item===g.id?' active':''),g.label);
+        it.setAttribute("role","button"); it.tabIndex=0;
         it.onclick=()=>{ds={cat:cat.id,item:g.id};buildNav();renderPanel();};
       }
       nav.appendChild(wrap);
     }else{
       const it=add(nav,'div','ditem'+(ds.cat===cat.id&&!ds.item?' active':''),`${cat.icon} ${cat.label}`);
+      it.setAttribute('role','button'); it.tabIndex=0;
       it.onclick=()=>{ds={cat:cat.id,item:null};buildNav();renderPanel();};
     }
   }
@@ -1502,18 +1504,7 @@ async function renderPanel(){
   }
 
   /* ── PROVIDERS ─────────────────────────── */
-  if(cat==='providers'){
-    p.innerHTML=`<h3>Providers</h3><div class="pd">The active adapter and the endpoints it can drive.</div>
-      <table class="tbl"><thead><tr><th>Provider</th><th>Adapter</th><th>Endpoint pattern</th></tr></thead><tbody>
-      <tr><td><b>openai</b> ${e.provider==='openai'?'<span style="color:var(--green)">● active</span>':''}</td><td>openai-adapter</td><td>any OpenAI-compatible /v1</td></tr>
-      <tr><td><b>anthropic</b> ${e.provider==='anthropic'?'<span style="color:var(--green)">● active</span>':''}</td><td>anthropic-adapter</td><td>api.anthropic.com</td></tr>
-      <tr><td><b>gemini</b> ${e.provider==='gemini'?'<span style="color:var(--green)">● active</span>':''}</td><td>gemini-adapter</td><td>generativelanguage.googleapis.com</td></tr>
-      <tr><td><b>ollama</b> ${e.provider==='ollama'?'<span style="color:var(--green)">● active</span>':''}</td><td>ollama-adapter</td><td>/api/chat</td></tr>
-      </tbody></table>
-      <div class="dsec">Credentials</div>
-      <div class="f"><label>Key source</label><div class="c"><input type="text" value="OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY in .env" disabled style="opacity:.7"><div class="hint">Keys are never shown or written by this UI.</div></div></div>`;
-    return;
-  }
+  if(cat==='providers'){ await renderProviders(p); return; }
 
   /* ── KEYBINDS ──────────────────────────── */
   if(cat==='keybinds'){
@@ -1614,6 +1605,250 @@ function applyUiPrefs(){
   document.body.dataset.density=p.density;
   document.body.dataset.tools=p.toolDisplay;
   document.querySelectorAll('#nav-prev,#nav-next').forEach(el=>{el.style.display=p.hideTimeline?'none':'';});
+}
+
+/* ── PROVIDERS: keys, subscriptions, custom endpoints, local runtimes ── */
+let provTab='keys', provFilter='', provData=null;
+
+async function renderProviders(host){
+  const {data}=await api('/providers');
+  provData=data||{};
+  const rows=provData.providers||[];
+  const imports=provData.imports||[];
+  const customs=provData.custom||[];
+
+  host.innerHTML=`
+    <h3>Providers</h3>
+    <div class="pd">Set a key for any provider, import a subscription token from a CLI you already signed into, or point LiBER at your own endpoint. Keys are stored in <span style="font-family:var(--mono)">.liber/credentials.json</span> (mode 0600) and never sent back to this window.</div>
+    <div class="tabs" id="ptabs">
+      <button class="tab ${provTab==='keys'?'active':''}" data-t="keys">API keys</button>
+      <button class="tab ${provTab==='accounts'?'active':''}" data-t="accounts">Accounts</button>
+      <button class="tab ${provTab==='custom'?'active':''}" data-t="custom">Custom endpoints</button>
+      <button class="tab ${provTab==='local'?'active':''}" data-t="local">Local models</button>
+    </div>
+    <div class="f"><label>Search</label><div class="c"><input type="text" id="p-search" placeholder="provider, endpoint or env var" value="${esc(provFilter)}"></div></div>
+    <div id="p-body"></div>`;
+
+  host.querySelectorAll('#ptabs .tab').forEach(t=>t.onclick=()=>{provTab=t.dataset.t;renderProviders(host);});
+  const search=host.querySelector('#p-search');
+  search.oninput=()=>{provFilter=search.value;drawProviderBody(host);};
+
+  drawProviderBody(host,rows,imports,customs);
+
+  async function drawProviderBody(h, rws, imps, cst){
+    rws=rws||provData.providers||[]; imps=imps||provData.imports||[]; cst=cst||provData.custom||[];
+    const body=h.querySelector('#p-body');
+    const q=provFilter.trim().toLowerCase();
+    const match=p=>!q||[p.id,p.label,p.base,p.env,p.adapter].join(' ').toLowerCase().includes(q);
+
+    if(provTab==='keys'){
+      const list=rws.filter(p=>p.kind==='api'&&match(p));
+      body.innerHTML=`<div class="pd" style="margin:6px 0 8px">${list.filter(p=>p.configured).length} of ${list.length} configured. Saved keys take precedence over <span style="font-family:var(--mono)">.env</span>.</div>
+        <div id="p-rows"></div>`;
+      const wrap=body.querySelector('#p-rows');
+      for(const p of list) wrap.appendChild(providerRow(p));
+      return;
+    }
+
+    if(provTab==='accounts'){
+      body.innerHTML=`<div class="pd" style="margin:6px 0 10px">Merlin-style "sign in with a subscription" without copying secrets out of another app: LiBER imports the token the vendor's own CLI already stored, and can run an OAuth device flow for any client id you own.</div>
+        <div class="dsec">Import from an installed CLI</div><div id="p-imports"></div>
+        <div class="dsec">Paste a token</div>
+        <div class="f"><label>Provider</label><div class="c"><select id="ac-prov">${rws.filter(p=>p.kind==='api').map(p=>`<option value="${p.id}">${esc(p.label)}</option>`).join('')}</select></div></div>
+        <div class="f"><label>Access token</label><div class="c"><input type="password" id="ac-token" placeholder="sk-… / oauth access token"><div class="hint">Stored like a key, shown only as a last-4 hint afterwards.</div></div></div>
+        <div class="brow"><button class="btn primary" id="ac-save">Store token</button></div>
+        <div class="dsec">OAuth device flow (your own client)</div>
+        <div class="pd" style="margin:0 0 8px">Needs a client id and the provider's device/token endpoints. LiBER never ships someone else's client id.</div>
+        <div class="f"><label>Provider id</label><div class="c"><input type="text" id="df-prov" value="openrouter"></div></div>
+        <div class="f"><label>Client ID</label><div class="c"><input type="text" id="df-client" placeholder="your app client id"></div></div>
+        <div class="f"><label>Device code URL</label><div class="c"><input type="text" id="df-device" placeholder="https://provider/oauth/device/code"></div></div>
+        <div class="f"><label>Token URL</label><div class="c"><input type="text" id="df-token" placeholder="https://provider/oauth/token"></div></div>
+        <div class="f"><label>Scope</label><div class="c"><input type="text" id="df-scope" value="openid offline_access"></div></div>
+        <div class="brow"><button class="btn" id="df-start">Start sign-in</button><button class="btn" id="df-poll" disabled>I approved it — finish</button></div>
+        <div id="df-out"></div>`;
+
+      const imp=body.querySelector('#p-imports');
+      if(!imps.length) imp.innerHTML='<div class="act">No import sources.</div>';
+      for(const i of imps){
+        const row=document.createElement('div');
+        row.className='card';
+        row.innerHTML=`<div class="card-h"><b>${esc(i.label)}</b>
+          <span style="color:${i.available?'var(--green)':'var(--dim)'};font-size:11px">${i.available?'found on this machine':'not found'}</span>
+          <span class="grow" style="flex:1"></span>
+          <button class="btn" ${i.available?'':'disabled'}>Import</button></div>
+          <div class="card-b" style="padding:8px 11px;font-family:var(--sans);font-size:11.5px;color:var(--muted)">
+          source: <span style="font-family:var(--mono)">${esc(importSourceHint(i.id))}</span>${i.updated_at?` · updated ${esc(i.updated_at.slice(0,16).replace('T',' '))}`:''} → stored as <span style="font-family:var(--mono)">${esc(i.provider)}</span></div>`;
+        row.querySelector('button').onclick=async()=>{
+          const r=await api('/providers/import','POST',{id:i.id});
+          if(r.status===200&&r.data.success){
+            toast(`imported ${r.data.via} → ${r.data.imported} (${r.data.hint})`);
+            await renderProviders(host);
+          } else toast('import failed: '+(r.data.error||r.status));
+        };
+        imp.appendChild(row);
+      }
+
+      body.querySelector('#ac-save').onclick=async()=>{
+        const r=await api('/providers/key','POST',{id:body.querySelector('#ac-prov').value,key:body.querySelector('#ac-token').value});
+        if(r.status===200&&r.data.success){toast('token stored for '+r.data.id+' ('+r.data.hint+')');await renderProviders(host);}
+        else toast('failed: '+(r.data.error||r.status));
+      };
+
+      let pollTimer=null;
+      body.querySelector('#df-start').onclick=async()=>{
+        const payload={
+          provider:body.querySelector('#df-prov').value.trim(),
+          client_id:body.querySelector('#df-client').value.trim(),
+          device_code_url:body.querySelector('#df-device').value.trim(),
+          token_url:body.querySelector('#df-token').value.trim(),
+          scope:body.querySelector('#df-scope').value.trim()
+        };
+        const out=body.querySelector('#df-out');
+        const r=await api('/providers/oauth/start','POST',payload);
+        if(r.status!==200||!r.data.success){out.innerHTML=`<div class="act bad">${esc(r.data.error||('HTTP '+r.status))}</div>`;return;}
+        const d=r.data;
+        out.innerHTML=`<div class="card"><div class="card-h">Open this and enter the code</div>
+          <div class="card-b" style="padding:10px 11px;font-family:var(--mono);font-size:12px;color:var(--text)">
+          ${d.verification_uri?`<div>${esc(d.verification_uri)}</div>`:''}
+          ${d.verification_uri_complete?`<div style="color:var(--dim)">${esc(d.verification_uri_complete)}</div>`:''}
+          <div style="font-size:18px;letter-spacing:.18em;margin-top:6px;color:var(--accent)">${esc(d.user_code||'')}</div>
+          <div style="color:var(--dim);margin-top:6px">poll every ${d.interval}s · expires in ${d.expires_in}s</div></div></div>`;
+        const poll=body.querySelector('#df-poll');
+        poll.disabled=false;
+        poll.onclick=async()=>{
+          const pr=await api('/providers/oauth/poll','POST',{provider:payload.provider});
+          if(pr.data.success){toast('signed in → '+payload.provider);clearInterval(pollTimer);await renderProviders(host);}
+          else toast(pr.data.pending?'still waiting for approval':('failed: '+(pr.data.error||'')));
+        };
+        clearInterval(pollTimer);
+        pollTimer=setInterval(async()=>{
+          const pr=await api('/providers/oauth/poll','POST',{provider:payload.provider});
+          if(pr.data.success){clearInterval(pollTimer);toast('signed in → '+payload.provider);await renderProviders(host);}
+          else if(!pr.data.pending){clearInterval(pollTimer);poll.disabled=true;out.insertAdjacentHTML('beforeend',`<div class="act bad">${esc(pr.data.error||'stopped')}</div>`);}
+        },Math.max(3,(d.interval||5))*1000);
+      };
+      return;
+    }
+
+    if(provTab==='custom'){
+      body.innerHTML=`<div class="pd" style="margin:6px 0 10px">Any OpenAI-compatible, Anthropic, Gemini or Ollama endpoint: Azure, Cloudflare, a self-hosted gateway, a tunnel.</div>
+        <div class="f"><label>Label</label><div class="c"><input type="text" id="cu-label" placeholder="My gateway"></div></div>
+        <div class="f"><label>Base URL</label><div class="c"><input type="text" id="cu-base" placeholder="https://host/v1"></div></div>
+        <div class="f"><label>Adapter</label><div class="c"><select id="cu-adapter"><option value="openai">openai-compatible</option><option value="anthropic">anthropic</option><option value="gemini">gemini</option><option value="ollama">ollama</option></select></div></div>
+        <div class="f"><label>API key</label><div class="c"><input type="password" id="cu-key" placeholder="optional for local gateways"></div></div>
+        <div class="brow"><button class="btn primary" id="cu-add">Add endpoint</button></div>
+        <div class="dsec">Saved endpoints</div><div id="cu-list"></div>`;
+      const list=body.querySelector('#cu-list');
+      if(!cst.length) list.innerHTML='<div class="act">No custom endpoints yet.</div>';
+      for(const cu of cst){
+        const row=document.createElement('div');
+        row.className='card';
+        row.innerHTML=`<div class="card-h"><b>${esc(cu.label)}</b><span style="font-family:var(--mono);font-size:11px;color:var(--dim)">${esc(cu.base)}</span>
+          <span class="grow" style="flex:1"></span><button class="btn" data-a="test">Test</button><button class="btn" data-a="use">Use</button><button class="btn" data-a="del">Remove</button></div>`;
+        row.querySelector('[data-a="test"]').onclick=()=>testProvider(cu.id);
+        row.querySelector('[data-a="use"]').onclick=()=>useProvider(cu.adapter,cu.base);
+        row.querySelector('[data-a="del"]').onclick=async()=>{await api('/providers/clear','POST',{id:cu.id});await renderProviders(host);};
+        list.appendChild(row);
+      }
+      body.querySelector('#cu-add').onclick=async()=>{
+        const r=await api('/providers/custom','POST',{
+          label:body.querySelector('#cu-label').value.trim(),
+          base:body.querySelector('#cu-base').value.trim(),
+          adapter:body.querySelector('#cu-adapter').value,
+          api_key:body.querySelector('#cu-key').value.trim()||null
+        });
+        if(r.status===200&&r.data.success){toast('endpoint saved');await renderProviders(host);}
+        else toast('failed: '+(r.data.error||r.status));
+      };
+      return;
+    }
+
+    // local
+    const locals=rws.filter(p=>p.kind==='local'&&match(p));
+    body.innerHTML=`<div class="pd" style="margin:6px 0 10px">Runtimes on this machine. No key needed; the base URL is what matters.</div><div id="l-rows"></div>`;
+    const wrap=body.querySelector('#l-rows');
+    if(!locals.length) wrap.innerHTML='<div class="act">No local runtimes matched.</div>';
+    for(const p of locals) wrap.appendChild(providerRow(p,true));
+  }
+
+  function providerRow(p,isLocal){
+    const row=document.createElement('div');
+    row.className='card';
+    row.innerHTML=`<div class="card-h">
+        <b>${esc(p.label)}</b>
+        <span style="font-family:var(--mono);font-size:10.5px;color:var(--dim)">${esc(p.adapter)}</span>
+        <span style="font-size:11px;color:${p.configured?'var(--green)':'var(--dim)'}">${p.configured?('configured · '+esc(p.source||'')+(p.hint?' · '+esc(p.hint):'')):'not configured'}</span>
+        <span style="flex:1"></span>
+        <button class="btn" data-a="use">Use</button>
+      </div>
+      <div style="padding:8px 11px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--dim)">${esc(p.base||'set a base URL in Custom endpoints')}${p.env?' · env '+esc(p.env):''}${p.expires_at?' · expires '+esc(fmtWhen(p.expires_at)):''}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <input type="password" placeholder="${isLocal?'optional key':'paste API key'}" style="flex:1;min-width:180px;background:var(--panel2);border:1px solid var(--border-strong);border-radius:6px;padding:6px 9px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none" data-f="key">
+          <button class="btn" data-a="save">Save</button>
+          <button class="btn" data-a="test">Test</button>
+          ${p.configured?'<button class="btn" data-a="clear">Clear</button>':''}
+        </div>
+        <div data-f="result" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></div>
+      </div>`;
+    const keyInput=row.querySelector('[data-f="key"]');
+    const result=row.querySelector('[data-f="result"]');
+    row.querySelector('[data-a="use"]').onclick=()=>useProvider(p.adapter,p.base,p.id);
+    row.querySelector('[data-a="test"]').onclick=async()=>{
+      result.textContent='testing…';
+      const r=await api('/providers/test','POST',{id:p.id});
+      const t=r.data.result||{};
+      result.innerHTML=t.ok
+        ? `<span style="color:var(--green)">✓ ${t.status} · ${t.model_count} models · ${t.latency_ms}ms</span>${t.sample&&t.sample.length?' · '+esc(t.sample.slice(0,3).join(', ')):''}`
+        : `<span style="color:var(--red)">✖ ${esc(t.error||'failed')}</span>`;
+    };
+    row.querySelector('[data-a="save"]').onclick=async()=>{
+      const v=keyInput.value.trim();
+      if(!v){result.textContent='paste a key first';return;}
+      const r=await api('/providers/key','POST',{id:p.id,key:v});
+      if(r.status===200&&r.data.success){keyInput.value='';toast(p.label+' key saved ('+r.data.hint+')');await renderProviders(host);}
+      else result.textContent=r.data.error||('HTTP '+r.status);
+    };
+    const clr=row.querySelector('[data-a="clear"]');
+    if(clr) clr.onclick=async()=>{await api('/providers/clear','POST',{id:p.id});toast(p.label+' credential cleared');await renderProviders(host);};
+    return row;
+  }
+
+  async function testProvider(id){
+    const r=await api('/providers/test','POST',{id});
+    const t=r.data.result||{};
+    toast(t.ok?`ok · ${t.model_count} models · ${t.latency_ms}ms`:(t.error||'failed'));
+  }
+
+  async function useProvider(adapter,base,id){
+    const model=prompt('Model id for this endpoint (blank keeps the current one):',currentModel||'');
+    if(model===null)return;
+    const payload={'engine.provider':adapter,'engine.endpoint':base};
+    if(model.trim())payload['engine.model']=model.trim();
+    const r=await api('/config','POST',payload);
+    if(r.status===200&&r.data.success){
+      currentModel=r.data.applied?.engine?.model||currentModel;
+      renderModel();
+      toast('switched to '+adapter+' @ '+base);
+    } else toast('switch failed: '+(r.data.error||r.status));
+  }
+}
+
+function fmtWhen(v){
+  const n=Number(v);
+  const d=new Date(Number.isFinite(n)&&n>1e12?n:v);
+  if(isNaN(d.getTime()))return String(v);
+  return d.toISOString().slice(0,16).replace('T',' ');
+}
+
+function importSourceHint(id){
+  return ({
+    'claude-code':'~/.claude/.credentials.json',
+    'gemini-cli':'~/.gemini/oauth_creds.json',
+    'codex-cli':'~/.codex/auth.json',
+    'qwen-code':'~/.qwen/oauth_creds.json',
+    'github-copilot':'gh auth token (~/.config/gh/hosts.yml)'
+  })[id]||id;
 }
 
 /* ── boot ────────────────────────────────────── */
