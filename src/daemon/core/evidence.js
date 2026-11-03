@@ -10,7 +10,9 @@ const KIND_BY_TOOL = {
   terminal: 'command',
   memory: 'memory',
   todo_list: 'todo',
-  fetch_url: 'fetch'
+  fetch_url: 'fetch',
+  task: 'task',
+  tasks: 'task'
 };
 
 // Verification-by-execution: a green test/build/lint run proves the tree is sound.
@@ -111,6 +113,31 @@ class EvidenceLedger {
     }
   }
 
+  /**
+   * Verbatim evidence for the semantic auditor (bounded).
+   */
+  detailOf(kind, result) {
+    if (!result || typeof result !== 'object') return String(result || '').slice(0, 700);
+    switch (kind) {
+      case 'read':
+        return String(result.content || '').slice(0, 700);
+      case 'command':
+        return String(result.output || result.error || '').slice(0, 700);
+      case 'write':
+        return String(result.message || '').slice(0, 400);
+      case 'patch':
+        return String(result.diff_preview || result.message || '').slice(0, 700);
+      case 'search':
+        return JSON.stringify((result.matches || []).slice(0, 5)).slice(0, 700);
+      case 'fetch':
+        return String(result.content || '').slice(0, 700);
+      case 'memory':
+        return JSON.stringify(result).slice(0, 400);
+      default:
+        return String(result.message || result.error || JSON.stringify(result)).slice(0, 400);
+    }
+  }
+
   record(tool, args = {}, result = {}, meta = {}) {
     const kind = this.classify(tool);
     const ok = this.isOk(kind, result, meta);
@@ -124,6 +151,7 @@ class EvidenceLedger {
       exit_code: typeof (result && result.exit_code) === 'number' ? result.exit_code : null,
       hash: hashOf(result),
       excerpt: this.excerptOf(kind, result),
+      detail: this.detailOf(kind, result),
       meta: { ...meta }
     };
     this.entries.push(entry);
@@ -211,10 +239,26 @@ class EvidenceLedger {
         target: e.target,
         exit_code: e.exit_code,
         hash: e.hash,
-        excerpt: e.excerpt
+        excerpt: e.excerpt,
+        detail: e.detail
       })),
       pending_verification: this.unresolvedPending()
     };
+  }
+
+  static fromJSON(data = {}) {
+    const ledger = new EvidenceLedger(data.agentId || 'agent');
+    ledger.entries = Array.isArray(data.receipts) ? data.receipts.map(e => ({ ...e, meta: e.meta || {} })) : [];
+    ledger.seq = ledger.entries.reduce(
+      (max, e) => Math.max(max, parseInt(String(e.id).replace(/^E/i, ''), 10) || 0),
+      0
+    );
+    ledger.pendingVerification = new Map(
+      (Array.isArray(data.pending_verification) ? data.pending_verification : [])
+        .filter(p => p && p.path)
+        .map(p => [normPath(p.path), p])
+    );
+    return ledger;
   }
 }
 

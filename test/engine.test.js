@@ -439,3 +439,220 @@ test('daily budget stops the turn before another model call', async () => {
   assert.match(res.response, /token budget exhausted/i);
   budget.reset();
 });
+
+test('semantic verifier blocks a cited but unsupported claim', async () => {
+  const main = [
+    '[TOOL: read_file({"path": "package.json"})]',
+    '[FINAL: package.json declares version 0.1.0 [E1].]',
+    '[FINAL: package.json declares version 0.1.0 [E1].]'
+  ];
+  const verdicts = [
+    '{"unsupported":[{"claim":"version 0.1.0","reason":"E1 does not show the version field","receipt":"E1"}]}',
+    '{"unsupported":[]}'
+  ];
+
+  let mainIdx = 0;
+  let verIdx = 0;
+  const llm = {
+    async generate(messages) {
+      const system = String(messages[0].content);
+      if (system.includes('evidence auditor')) {
+        return verdicts[Math.min(verIdx++, verdicts.length - 1)];
+      }
+      return main[Math.min(mainIdx++, main.length - 1)];
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const base = cfg();
+  const res = await engine.runTurn({
+    agentId: 't-semantic',
+    agentConfig: { ...base, grounding: { ...base.grounding, semantic_verifier: true } },
+    userMessage: 'which version?',
+    memory,
+    llmManager: llm,
+    onEvent: () => {},
+    maxLoops: 6
+  });
+
+  assert.equal(res.repairs, 1);
+  assert.equal(res.grounding.status, 'PASS');
+  assert.equal(res.grounding.semantic, 'pass');
+  assert.ok(res.trace.some(t => t.type === 'grounding' && t.semantic === 'fail'));
+});
+
+test('semantic verifier fails open when the auditor call errors', async () => {
+  const llm = {
+    async generate(messages) {
+      const system = String(messages[0].content);
+      if (system.includes('evidence auditor')) throw new Error('auditor offline');
+      return mainResponse();
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  let calls = 0;
+  function mainResponse() {
+    calls++;
+    if (calls === 1) return '[TOOL: read_file({"path": "package.json"})]';
+    return '[FINAL: package.json declares version 0.1.0 [E1].]';
+  }
+
+  const base = cfg();
+  const res = await engine.runTurn({
+    agentId: 't-semantic-error',
+    agentConfig: { ...base, grounding: { ...base.grounding, semantic_verifier: true } },
+    userMessage: 'which version?',
+    memory,
+    llmManager: llm,
+    onEvent: () => {},
+    maxLoops: 6
+  });
+
+  assert.equal(res.grounding.status, 'PASS');
+  assert.equal(res.grounding.semantic, 'error');
+});
+
+test('the task tool runs an isolated subagent and records a receipt', async () => {
+  let parentCalls = 0;
+  let childCalls = 0;
+  const llm = {
+    async generate(messages) {
+      const system = String(messages[0].content);
+      if (system.includes('SUBAGENT MODE')) {
+        childCalls++;
+        return childCalls === 1
+          ? '[TOOL: read_file({"path": "package.json"})]'
+          : '[FINAL: package.json declares version 0.1.0 [E1].]';
+      }
+      parentCalls++;
+      return parentCalls === 1
+        ? '[TOOL: task({"goal": "report the exact version from package.json"})]'
+        : '[FINAL: The subagent reports version 0.1.0 [E1].]';
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-subagent',
+    agentConfig: cfg(),
+    userMessage: 'delegate the version check',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 6
+  });
+
+  assert.equal(res.grounding.ledger.receipts[0].tool, 'task');
+  assert.equal(res.grounding.ledger.receipts[0].kind, 'task');
+  assert.match(res.response, /0\.1\.0/);
+  assert.ok(events.some(x => x.e === 'subagent_start'));
+  assert.ok(events.some(x => x.e === 'subagent_end' && x.d.grounded === true));
+});
+
+test('the tasks tool runs subagents in parallel and reports both', async () => {
+  let parentCalls = 0;
+  const llm = {
+    async generate(messages) {
+      const system = String(messages[0].content);
+      if (system.includes('SUBAGENT MODE')) {
+        const user = String(messages[1]?.content || '');
+        if (user.includes('Alpha')) return '[FINAL: Alpha report: no findings.]';
+        return '[FINAL: Beta report: no findings.]';
+      }
+      parentCalls++;
+      return parentCalls === 1
+        ? '[TOOL: tasks({"tasks": [{"goal": "Alpha check"}, {"goal": "Beta check"}]})]'
+        : '[FINAL: Both reports were received [E1].]';
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-parallel',
+    agentConfig: cfg(),
+    userMessage: 'run both checks',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 6
+  });
+
+  assert.equal(res.grounding.ledger.receipts[0].tool, 'tasks');
+  assert.equal(events.filter(x => x.e === 'subagent_start').length, 2);
+  const observation = events.find(x => x.e === 'observation');
+  assert.match(observation.d.output, /Alpha report/);
+  assert.match(observation.d.output, /Beta report/);
+});
+
+test('resumes an interrupted turn from a saved state', async () => {
+  const { EvidenceLedger } = require('../src/daemon/core/evidence');
+  const journal = require('../src/daemon/core/journal');
+
+  const restored = new EvidenceLedger('t-resume');
+  const ev = restored.record('read_file', { path: 'package.json' }, {
+    content: '1 | {"version":"0.1.0"}',
+    total_lines: 1,
+    lines_read: 1
+  });
+
+  const state = {
+    agentId: 't-resume',
+    userMessage: 'which version?',
+    messages: [
+      { role: 'system', content: '' },
+      { role: 'user', content: 'which version?' },
+      { role: 'assistant', content: '[TOOL: read_file({"path":"package.json"})]' },
+      { role: 'user', content: `OBSERVATION [${ev.id}] read_file OK: ...` }
+    ],
+    ledger: restored.toJSON(),
+    repairs: 0,
+    iteration: 1
+  };
+  journal.save(state);
+
+  const memoryStub = {
+    added: [],
+    add(agentId, role) {
+      this.added.push(role);
+    },
+    get() {
+      return [];
+    }
+  };
+
+  const llm = {
+    async generate() {
+      return '[FINAL: package.json declares version 0.1.0 [E1].]';
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const res = await engine.runTurn({
+    agentId: 't-resume',
+    agentConfig: cfg(),
+    userMessage: 'which version?',
+    memory: memoryStub,
+    llmManager: llm,
+    onEvent: () => {},
+    maxLoops: 4,
+    resumeState: state
+  });
+
+  assert.equal(res.grounding.status, 'PASS', JSON.stringify(res.grounding.violations));
+  assert.equal(res.grounding.ledger.receipts[0].id, 'E1');
+  assert.ok(!memoryStub.added.includes('user'), 'resume must not re-add the user message');
+  assert.equal(journal.load('t-resume'), null, 'journal cleared after completion');
+});

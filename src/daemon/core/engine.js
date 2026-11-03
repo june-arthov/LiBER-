@@ -7,14 +7,21 @@ const { EvidenceLedger } = require('./evidence');
 const grounding = require('./grounding');
 const skills = require('./skills');
 const budget = require('./budget');
+const verifier = require('./verifier');
+const journal = require('./journal');
 
 const DEFAULT_GROUNDING = {
   enabled: true,
   max_repairs: 2,
   require_readback: true,
   require_citations: true,
+  semantic_verifier: false,
   doctrine_budget_chars: 7000
 };
+
+// Subagents are read/verify workers: no mutations, no recursion, no HITL prompts.
+const SUBAGENT_TOOLS = ['read_file', 'search_files', 'terminal', 'fetch_url', 'todo_list', 'memory'];
+const SUBAGENT_MAX_LOOPS = 6;
 
 class MerlinEngine {
   /**
@@ -217,6 +224,133 @@ class MerlinEngine {
     return [systemMsg, summaryMessage, ...recent];
   }
 
+  clip(text, max = 2000) {
+    const s = String(text || '');
+    return s.length > max ? s.slice(0, max) + '\n... [TRUNCATED]' : s;
+  }
+
+  /**
+   * Resume an interrupted turn from the journal.
+   */
+  async resume(agentId, { agentConfig, memory, llmManager, onEvent = () => {}, maxLoops = 12 }) {
+    const state = journal.load(agentId);
+    if (!state) {
+      return { success: false, error: `No interrupted turn for '${agentId}'.` };
+    }
+    return this.runTurn({
+      agentId,
+      agentConfig,
+      userMessage: state.userMessage,
+      memory,
+      llmManager,
+      onEvent,
+      maxLoops,
+      resumeState: state
+    });
+  }
+
+  /**
+   * Execute `task` / `tasks`: isolated child turns with their own ledger and context.
+   */
+  async runSubagentTool({ call, agentConfig, llmManager, depth, onEvent, parentId, seq }) {
+    if (depth >= 1) {
+      return { error: 'Subagent depth limit reached: a subagent cannot spawn another subagent.' };
+    }
+
+    if (call.name === 'task') {
+      const goal = String(call.args.goal || '').trim();
+      if (!goal) return { error: "Missing 'goal' argument." };
+      const result = await this.runSubagent({
+        goal,
+        context: call.args.context || '',
+        agentConfig,
+        llmManager,
+        depth,
+        onEvent,
+        parentId,
+        seq
+      });
+      return { mode: 'single', result };
+    }
+
+    const list = Array.isArray(call.args.tasks) ? call.args.tasks : [];
+    if (!list.length) return { error: "Missing non-empty 'tasks' array." };
+    if (list.length > 4) return { error: 'At most 4 parallel subagents per call.' };
+
+    const results = await Promise.all(list.map((task, i) => {
+      const goal = String(task?.goal || '').trim();
+      if (!goal) return { error: `Task ${i + 1} is missing 'goal'.` };
+      return this.runSubagent({
+        goal,
+        context: task?.context || '',
+        agentConfig,
+        llmManager,
+        depth,
+        onEvent,
+        parentId,
+        seq: `${seq}-${i + 1}`
+      });
+    }));
+
+    return { mode: 'parallel', results };
+  }
+
+  async runSubagent({ goal, context, agentConfig, llmManager, depth, onEvent, parentId, seq }) {
+    const childId = `${parentId}::sub${seq}`;
+
+    const store = new Map();
+    const childMemory = {
+      add(agentId, role, content) {
+        const arr = store.get(agentId) || [];
+        arr.push({ role, content });
+        while (arr.length > 20) arr.shift();
+        store.set(agentId, arr);
+      },
+      get(agentId) {
+        return store.get(agentId) || [];
+      }
+    };
+
+    const childConfig = {
+      ...agentConfig,
+      name: `sub-${seq}`,
+      system_prompt: `${agentConfig.system_prompt || ''}\nSUBAGENT MODE. Complete only the assigned goal, verify with tools, cite receipts, and return a concise report. You cannot spawn subagents.`,
+      engine: { ...agentConfig.engine, stream: false },
+      grounding: { ...(agentConfig.grounding || {}), semantic_verifier: false }
+    };
+
+    onEvent('subagent_start', { id: childId, goal: goal.slice(0, 220) });
+
+    try {
+      const res = await this.runTurn({
+        agentId: childId,
+        agentConfig: childConfig,
+        userMessage: `${goal}\n\nContext:\n${context || '(none)'}`,
+        memory: childMemory,
+        llmManager,
+        onEvent: () => {},
+        waitForHitl: async () => false,
+        maxLoops: SUBAGENT_MAX_LOOPS,
+        depth: depth + 1,
+        allowedTools: SUBAGENT_TOOLS
+      });
+
+      const report = {
+        id: childId,
+        goal,
+        grounded: res.grounded,
+        status: res.grounding?.status || null,
+        response: this.clip(res.response, 2000),
+        receipts: (res.grounding?.ledger?.receipts || []).map(r => `${r.id}:${r.tool}`)
+      };
+      onEvent('subagent_end', { id: childId, status: report.status, grounded: report.grounded });
+      return report;
+    } catch (err) {
+      onEvent('subagent_end', { id: childId, status: 'ERROR', error: err.message });
+      return { id: childId, goal, error: err.message };
+    }
+  }
+
   async runTurn({
     agentId,
     agentConfig,
@@ -225,38 +359,63 @@ class MerlinEngine {
     llmManager,
     onEvent = () => {},
     waitForHitl = async () => true,
-    maxLoops = 12
+    maxLoops = 12,
+    depth = 0,
+    allowedTools = null,
+    resumeState = null
   }) {
+    const resumed = !!resumeState;
     const cfg = { ...DEFAULT_GROUNDING, ...(agentConfig.grounding || {}) };
-    const ledger = new EvidenceLedger(agentId);
+    const ledger = resumed ? EvidenceLedger.fromJSON(resumeState.ledger) : new EvidenceLedger(agentId);
     const skillCtx = skills.buildContext(String(userMessage || ''), cfg.doctrine_budget_chars);
 
     circuitBreaker.configureLimit(agentId, maxLoops);
     circuitBreaker.reset(agentId);
 
-    memory.add(agentId, 'user', userMessage);
-    logger.info(agentId, 'USER_MESSAGE_START', { userMessage });
+    if (!resumed) {
+      memory.add(agentId, 'user', userMessage);
+    }
+    logger.info(agentId, 'USER_MESSAGE_START', { userMessage, resumed });
 
-    const history = memory.get(agentId).map(m => ({ role: m.role, content: m.content }));
-    let messages = [{ role: 'system', content: '' }, ...history];
+    let messages;
+    if (resumed && Array.isArray(resumeState.messages) && resumeState.messages.length) {
+      messages = resumeState.messages.map(m => ({ ...m }));
+    } else {
+      const history = memory.get(agentId).map(m => ({ role: m.role, content: m.content }));
+      messages = [{ role: 'system', content: '' }, ...history];
+    }
 
     let finalResponse = '';
     let auditResult = null;
-    let repairs = 0;
-    let iteration = 0;
+    let repairs = resumed ? Number(resumeState.repairs || 0) : 0;
+    let iteration = resumed ? Number(resumeState.iteration || 0) : 0;
     const trace = [];
     const requestStartTime = Date.now();
     const callCounts = new Map();
     const usageTotals = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     let streamedAny = false;
     let nativeTools = agentConfig.engine?.native_tools === true;
+    let subSeq = 0;
+
+    const persistTurn = () => {
+      if (cfg.journal === false) return;
+      journal.save({
+        agentId,
+        userMessage,
+        messages,
+        ledger: ledger.toJSON(),
+        repairs,
+        iteration
+      });
+    };
 
     onEvent('start', {
       agentId,
       model: agentConfig.engine?.model,
       grounding: !!cfg.enabled,
       max_loops: maxLoops,
-      skills: skillCtx.used
+      skills: skillCtx.used,
+      resumed
     });
 
     while (iteration < maxLoops) {
@@ -376,14 +535,54 @@ class MerlinEngine {
       if (!hasNativeCalls && (explicitFinal !== null || textToolCalls.length === 0)) {
         const candidate = explicitFinal !== null ? explicitFinal : this.cleanAnswer(response);
 
-        const verdict = cfg.enabled
+        let verdict = cfg.enabled
           ? grounding.audit(candidate, ledger, {
               requireReadback: cfg.require_readback,
               requireCitations: cfg.require_citations
             })
           : { passed: true, status: 'DISABLED', violations: [], claims_checked: 0, receipts: ledger.entries.length, citations: [] };
 
-        trace.push({ type: 'grounding', status: verdict.status, violations: verdict.violations.length, repairs });
+        // Second pass: does a receipt actually entail the claim, not merely exist?
+        if (cfg.enabled && cfg.semantic_verifier && verdict.passed && ledger.entries.length) {
+          try {
+            const sem = await verifier.verify({ candidate, ledger, llmManager });
+            if (sem.unsupported.length) {
+              verdict = {
+                ...verdict,
+                passed: false,
+                status: 'REPAIR',
+                semantic: 'fail',
+                violations: sem.unsupported.map(u => ({
+                  code: 'SEMANTIC_UNSUPPORTED',
+                  text: u.claim,
+                  line: null,
+                  hint: `Not entailed by the receipts${u.receipt ? ` (${u.receipt})` : ''}: ${u.reason || 'no support found'}. Verify it with a tool, remove it, or mark it UNVERIFIED.`
+                }))
+              };
+            } else {
+              verdict = { ...verdict, semantic: sem.parse_error ? 'error' : 'pass' };
+            }
+          } catch (err) {
+            logger.warn(agentId, 'SEMANTIC_VERIFIER_ERROR', { error: err.message });
+            verdict = { ...verdict, semantic: 'error' };
+          }
+
+          const verifyUsage = typeof llmManager.getLastUsage === 'function' ? llmManager.getLastUsage() : null;
+          if (verifyUsage) {
+            usageTotals.prompt_tokens += Number(verifyUsage.prompt_tokens || 0);
+            usageTotals.completion_tokens += Number(verifyUsage.completion_tokens || 0);
+            usageTotals.total_tokens += Number(verifyUsage.total_tokens || 0);
+            budget.record(verifyUsage, agentConfig.engine || {});
+          }
+        }
+
+        trace.push({
+          type: 'grounding',
+          status: verdict.status,
+          violations: verdict.violations.length,
+          repairs,
+          semantic: verdict.semantic || null
+        });
 
         if (!verdict.passed && repairs < cfg.max_repairs) {
           repairs++;
@@ -406,6 +605,7 @@ class MerlinEngine {
           logger.warn(agentId, 'GROUNDING_REPAIR', { attempt: repairs, codes: verdict.violations.map(v => v.code) });
           circuitBreaker.increment(agentId);
           iteration++;
+          persistTurn();
           continue;
         }
 
@@ -498,6 +698,18 @@ class MerlinEngine {
         let result;
         if (denied) {
           result = { error: `DENIED by the human operator. Tool '${call.name}' did not execute.` };
+        } else if (allowedTools && !allowedTools.includes(call.name)) {
+          result = { error: `Tool '${call.name}' is not available in this context (subagents are read/verify workers).` };
+        } else if (call.name === 'task' || call.name === 'tasks') {
+          result = await this.runSubagentTool({
+            call,
+            agentConfig,
+            llmManager,
+            depth,
+            onEvent,
+            parentId: agentId,
+            seq: ++subSeq
+          });
         } else {
           result = await registry.execute(call.name, call.args);
         }
@@ -526,7 +738,10 @@ class MerlinEngine {
 
       circuitBreaker.increment(agentId);
       iteration++;
+      persistTurn();
     }
+
+    journal.clear(agentId);
 
     if (!finalResponse) {
       const pending = ledger.unresolvedPending();
@@ -575,6 +790,7 @@ class MerlinEngine {
         status: auditResult ? auditResult.status : 'INCOMPLETE',
         passed: auditResult ? auditResult.passed : null,
         claims_checked: auditResult ? auditResult.claims_checked : 0,
+        semantic: auditResult ? (auditResult.semantic || null) : null,
         violations: auditResult ? auditResult.violations : [],
         repairs,
         ledger: ledger.toJSON()

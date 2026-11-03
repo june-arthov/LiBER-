@@ -98,6 +98,9 @@ liber chat dev-bot "audit project directory and verify package.json"
 ```powershell
 liber ps          # Check agent fleet status and uptime
 liber logs -n 25  # View structured telemetry stream
+liber skills      # List procedural skills (liber skills <name> to print one)
+liber resume      # Continue an interrupted turn from .liber/turns/
+liber reset       # Clear the persisted conversation window
 liber stop        # Gracefully shutdown daemon
 ```
 
@@ -120,17 +123,20 @@ mechanically on every turn:
    success cannot be claimed until the file is read back or a test/build runs green.
 5. **Argument validation** — tool calls are validated against their schema before execution;
    missing, typo'd or ill-typed arguments are rejected and fed back, never executed.
-6. **Skills** — a real procedural library: `skills/<name>/SKILL.md` (global) and
+6. **Semantic verifier** — after the syntactic gate passes, a second pass asks whether the cited
+   receipt actually *entails* each claim. Unsupported claims are sent back for repair.
+7. **Skills** — a real procedural library: `skills/<name>/SKILL.md` (global) and
    `.liber/skills/` (per project). The prompt carries a cheap index plus the always-on core
    procedures; the model loads a body with the `skill` tool, and matching triggers auto-select
    one for the task. Inspect with `liber skills [name]`.
 
 **What it guarantees:** no unverified claim is delivered as verified fact — every auditable claim
-is bound to a real receipt or explicitly labelled UNVERIFIED. It does not make the model
-omniscient: receipt binding is syntactic (the claim cited *a* real receipt), so the doctrine still
-obliges the model to cite the receipt that actually proves the claim.
+is bound to a real receipt or explicitly labelled UNVERIFIED, and a second model pass checks whether
+the cited receipt actually entails it. It is still not a proof system: the semantic verifier can miss
+subtle unsupported claims or flag supported ones, and a verifier outage fails open (recorded as
+`semantic: error`, never silently as `pass`).
 
-Run the enforcement suite with `npm test` (73 tests, including a scripted model that hallucinates,
+Run the enforcement suite with `npm test` (105 tests, including a scripted model that hallucinates,
 gets blocked, and is forced to read the file before answering).
 
 ## 📚 Skill Library
@@ -154,6 +160,12 @@ Shipped skills: `iron-law` (always), `grounding-protocol` (always), `systematic-
 
 | Capability | Behaviour |
 |---|---|
+| Daemon auth | Every endpoint except `/healthz` requires `Authorization: Bearer <token>`; the token lives in `.liber/daemon.token` and is read by the CLI/TUI. |
+| Write policy | `write_file` / `patch` are confined to `policy.write_roots`; writes outside the workspace are refused unless explicitly enabled. The shell is **not** sandboxed. |
+| Native tool calling | `engine.native_tools: true` uses the provider's tool API with canonical assistant/tool messages; falls back to the text protocol if the provider rejects it. |
+| Budget guard | `limits.max_tokens_per_day` and (when prices are set) `max_cost_per_day` are enforced before every model call; state in `.liber/budget.json`. |
+| Subagents | `task` runs one isolated child turn; `tasks` runs up to 4 in parallel. Children get their own ledger, read-only tools, no recursion, and return a cited report as a receipt. |
+| Resume | The turn journal (`.liber/turns/`) is written every iteration; after a crash `liber resume` continues from the last completed iteration with its receipts intact. |
 | Live reasoning | Each model turn's reasoning is captured — tagged `[THOUGHT: …]` or untagged prose before a tool call — and streamed to the CLI/TUI as a `REASONING` block before the answer. |
 | Draft streaming | With `engine.stream: true`, raw model output types out live in a `DRAFT · UNVERIFIED` line while the answer is still being generated. The audited answer replaces it; a partial stream is discarded and regenerated. Token usage is preserved via `stream_options.include_usage`. |
 | Streaming CLI | `liber` and `liber chat` consume `/chat/stream`, so reasoning, tool calls and observations appear as they happen instead of only at the end. |

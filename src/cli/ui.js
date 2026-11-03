@@ -333,6 +333,14 @@ function printStreamEvent(event, data = {}) {
       console.log('  ' + C.amber(`↻ duplicate ${data.tool} call suppressed (receipt ${data.receipt || 'n/a'})`));
       break;
 
+    case 'subagent_start':
+      console.log('  ' + C.cyan(`⇢ subagent ${data.id}`) + C.dim(` ${truncateText(data.goal, 120)}`));
+      break;
+
+    case 'subagent_end':
+      console.log('  ' + (data.grounded === false ? C.amber('⇠ subagent') : C.green('⇠ subagent')) + C.dim(` ${data.id} · ${data.status || 'done'}`));
+      break;
+
     case 'hitl_intercept':
       console.log('  ' + C.amber(`⚠ HITL: auto-approving ${data.tool} (use the TUI for interactive approval)`));
       break;

@@ -5,6 +5,7 @@ const { manageTodo } = require('./tools/todo-tool');
 const { manageMemory } = require('./tools/memory-tool');
 const { fetchUrl } = require('./tools/web-tool');
 const { manageSkill, ACTIONS: SKILL_ACTIONS } = require('./tools/skill-tool');
+const { TASK_TOOLS } = require('./tools/task-tool');
 const { validateArgs } = require('./validate');
 
 class ToolRegistry {
@@ -166,6 +167,9 @@ class ToolRegistry {
       handler: manageSkill,
       isSensitiveCheck: (args) => ['create', 'update'].includes(String(args.action || '').toLowerCase())
     });
+
+    // 10. task / tasks — subagent orchestration (executed by the engine)
+    for (const def of TASK_TOOLS) this.register(def);
   }
 
   register(def) {

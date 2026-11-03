@@ -471,6 +471,23 @@ class LiberApp(App):
                 )
             return
 
+        if event == "subagent_start":
+            self.log_widget.write(
+                Text.assemble(
+                    LiberCue.badge("SUBAGENT", "black on #06B6D4"),
+                    (f" {data.get('id', '')} · {data.get('goal', '')}", "dim #67E8F9")
+                )
+            )
+            return
+        if event == "subagent_end":
+            self.log_widget.write(
+                Text.assemble(
+                    LiberCue.badge("SUBAGENT", "white on #0891B2"),
+                    (f" {data.get('id', '')} · {data.get('status', 'done')}", "dim #67E8F9")
+                )
+            )
+            return
+
         # 1. Thought / Reasoning
         if event == "thought":
             thought_text = data.get("content", "")

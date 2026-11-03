@@ -241,12 +241,14 @@ async function formatStatusTable() {
     const upStr = uptimeSec > 3600
       ? `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`
       : `${uptimeSec}s`;
-    const statusCol = a.status === 'RUNNING' ? C.green('● ' + a.status) : C.amber('○ ' + a.status);
+    const statusText = `${a.status === 'RUNNING' ? '●' : '○'} ${a.status}`;
+    const statusCol = a.status === 'RUNNING' ? C.green(statusText) : C.amber(statusText);
+    const statusPad = ' '.repeat(Math.max(0, 12 - statusText.length));
 
     lines.push(
       '  ' + C.darkDim('│ ') +
       C.sky(a.id.padEnd(16)) +
-      statusCol.padEnd(21) +
+      statusCol + statusPad +
       upStr.padEnd(12) +
       String(a.metrics?.requests || 0).padEnd(10) +
       C.darkDim('│')
@@ -524,6 +526,36 @@ program
       console.log(`${C.green('✔')} Session memory cleared.`);
     } catch (err) {
       console.log(C.dim(`Daemon not reachable: ${err.message}`));
+    }
+  });
+
+// COMMAND: resume
+program
+  .command('resume [agentId]')
+  .description('Resume an interrupted turn from .liber/turns/')
+  .action(async (agentId) => {
+    try {
+      await ensureDaemon();
+      const turns = await requestDaemon('/turns');
+      if (!turns.success || !(turns.turns || []).length) {
+        console.log(C.dim('  No interrupted turns to resume.'));
+        return;
+      }
+      const target = agentId || turns.turns[0].agentId;
+      const entry = turns.turns.find(t => t.agentId === target);
+      if (!entry) {
+        console.log(C.red(`  No interrupted turn for '${target}'.`));
+        return;
+      }
+      console.log(C.cyan(`  Resuming ${target} at iteration ${entry.iteration} — "${entry.user}"`));
+      const res = await requestDaemon('/resume', 'POST', { agentId: target }, 600000);
+      if (res.success === false) {
+        console.log(C.red(`  ${res.error}`));
+        return;
+      }
+      ui.printAgentResponse(target, res);
+    } catch (err) {
+      console.error(`${C.red('✖ Error:')} ${err.message}`);
     }
   });
 

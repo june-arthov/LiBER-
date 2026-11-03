@@ -146,6 +146,7 @@ const FIX_HINTS = {
   CITATION_UNKNOWN: 'That receipt ID does not exist. Use only IDs listed in the Evidence Ledger.',
   PHANTOM_ACTION: 'No receipt matches this action. Perform it with a tool and cite the result, or remove the claim.',
   UNVERIFIED_SUCCESS: 'Run the verification (read_file read-back, or a test/build run) and cite it, or state plainly that the work is unverified.',
+  SEMANTIC_UNSUPPORTED: 'The cited receipt does not entail this claim. Verify it with a tool, remove it, or mark it UNVERIFIED.',
   PENDING_MUTATION_UNVERIFIED: 'A file was changed but never read back. Call read_file on each changed path (or run the test suite), then cite the receipt.',
   UNGROUNDED_FACT: 'Verify with terminal (`date`, `<tool> --version`) or fetch_url of the primary source, then cite it.'
 };

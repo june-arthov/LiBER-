@@ -9,6 +9,7 @@ const circuitBreaker = require('./core/circuit-breaker');
 const trace = require('./core/trace');
 const auth = require('./core/auth');
 const policy = require('./core/policy');
+const journal = require('./core/journal');
 const logger = require('../utils/logger');
 
 class LiberDaemon {
@@ -166,6 +167,30 @@ class LiberDaemon {
       else if (endpoint === '/session/clear') {
         memory.clearAll();
         res.end(JSON.stringify({ success: true, cleared: true }));
+      }
+      else if (endpoint === '/turns') {
+        res.end(JSON.stringify({ success: true, turns: journal.list() }));
+      }
+      else if (endpoint === '/resume') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { agentId } = JSON.parse(body || '{}');
+        const id = agentId || Array.from(this.agents.keys())[0];
+        if (!this.agents.has(id)) throw new Error(`Agent ${id} not found`);
+
+        const agent = this.agents.get(id);
+        const result = await merlinEngine.resume(id, {
+          agentConfig: agent.config,
+          memory,
+          llmManager,
+          onEvent: () => {},
+          maxLoops: this.maxLoops
+        });
+
+        if (result && result.response && this.traceEnabled) {
+          trace.appendTurn({ agentId: id, userMessage: '(resumed turn)', result, model: agent.config.engine?.model });
+        }
+        res.end(JSON.stringify(result));
       }
       else if (endpoint === '/hitl/verdict') {
         let body = '';

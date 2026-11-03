@@ -59,3 +59,19 @@ test('invalid-argument results are recorded as failures', () => {
   const ev = ledger.record('read_file', {}, { error: 'Invalid arguments', validation_failed: true });
   assert.equal(ev.ok, false);
 });
+
+test('ledger round-trips through toJSON/fromJSON for resume', () => {
+  const ledger = new EvidenceLedger('r');
+  const a = ledger.record('read_file', { path: 'a.txt' }, { content: 'x', total_lines: 1, lines_read: 1 });
+  const b = ledger.record('write_file', { path: 'b.txt', content: 'y' }, { success: true, bytes_written: 1 });
+
+  const restored = EvidenceLedger.fromJSON(ledger.toJSON());
+  assert.equal(restored.entries.length, 2);
+  assert.equal(restored.entries[0].id, a.id);
+  assert.equal(restored.entries[1].id, b.id);
+  assert.equal(restored.unresolvedPending().length, 1);
+  assert.equal(restored.hasReceipt('E1'), true);
+  // New receipts continue the sequence, never collide.
+  const c = restored.record('terminal', { command: 'echo hi' }, { exit_code: 0, output: 'hi' });
+  assert.equal(c.id, 'E3');
+});

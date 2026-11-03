@@ -33,6 +33,7 @@ grounding:
   max_repairs: 2          # audit-repair rounds before an answer ships with a GROUNDING AUDIT warning
   require_readback: true  # write_file/patch must be followed by read_file before success is claimed
   require_citations: true # every audited claim must cite an [E#] receipt
+  semantic_verifier: true # second pass: does the cited receipt actually entail the claim?
   doctrine_budget_chars: 7000
 
 # Procedural skill library (see src/daemon/core/skills.js)
