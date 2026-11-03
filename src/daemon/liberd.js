@@ -99,8 +99,12 @@ class LiberDaemon {
       });
 
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
-      this.server.listen(this.port, () => {
-        logger.info('SYSTEM', 'DAEMON_START', { port: this.port });
+      // Bind to loopback by default: the daemon has no auth, so exposing it on the LAN
+      // would let any device spend the API key or call /shutdown. Override deliberately
+      // with LIBER_HOST only behind a trusted proxy.
+      const host = process.env.LIBER_HOST || '127.0.0.1';
+      this.server.listen(this.port, host, () => {
+        logger.info('SYSTEM', 'DAEMON_START', { port: this.port, host });
       });
     } catch (err) {
       logger.error('SYSTEM', 'BOOT_FAILED', { error: err.message });
