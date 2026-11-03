@@ -1,12 +1,16 @@
 // src/daemon/llm/manager.js
 const OllamaAdapter = require('./adapters/ollama-adapter');
 const OpenAIAdapter = require('./adapters/openai-adapter');
+const AnthropicAdapter = require('./adapters/anthropic-adapter');
+const GeminiAdapter = require('./adapters/gemini-adapter');
 
 class LLMManager {
   constructor() {
     this.adapters = {
       ollama: OllamaAdapter,
       openai: OpenAIAdapter,
+      anthropic: AnthropicAdapter,
+      gemini: GeminiAdapter
       // Provider baru tinggal ditambahkan di sini
     };
     this.activeAdapter = null;

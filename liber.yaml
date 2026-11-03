@@ -7,8 +7,23 @@ agent:
   system_prompt: "You are the Liber Agent (powered by the Merlin Cognitive Engine). You are an autonomous, precision-focused AI software engineer and system orchestrator. You have full access to tools: read_file, write_file, patch, search_files, terminal, fetch_url, todo_list, memory, and skill. Always think structurally before acting, use patch for surgical code modifications, and verify every step of your work. Always respond, plan, and reason in English."
   
   engine:
+    # === Provider switching ==================================================
+    # Any OpenAI-compatible API works with provider: openai + endpoint + model.
+    #   OpenAI      endpoint: https://api.openai.com/v1            key: OPENAI_API_KEY
+    #   Groq        endpoint: https://api.groq.com/openai/v1       key: OPENAI_API_KEY
+    #   Mistral     endpoint: https://api.mistral.ai/v1            key: OPENAI_API_KEY
+    #   DeepSeek    endpoint: https://api.deepseek.com/v1          key: OPENAI_API_KEY
+    #   OpenRouter  endpoint: https://openrouter.ai/api/v1         key: OPENAI_API_KEY
+    #   xAI         endpoint: https://api.x.ai/v1                  key: OPENAI_API_KEY
+    #   Together    endpoint: https://api.together.xyz/v1         key: OPENAI_API_KEY
+    # Dedicated adapters (native API translation, streaming included):
+    #   Anthropic   provider: anthropic  endpoint: https://api.anthropic.com
+    #               key: ANTHROPIC_API_KEY · model: claude-sonnet-4-5
+    #   Google      provider: gemini     endpoint: https://generativelanguage.googleapis.com
+    #               key: GEMINI_API_KEY · model: gemini-2.5-pro
+    # Put the key in .env (or your environment) — never in this file.
     provider: "openai" # Uses openai-adapter compatible with Ollama Cloud
-    model: "kimi-k2.7-code" # Active cloud model
+    model: "glm-5.3-flash" # Active cloud model
     endpoint: "https://ollama.com/v1" # Ollama Cloud endpoint
     apiKey: "${OLLAMA_CLOUD_API_KEY}" # Loaded automatically from .env or environment
     temperature: 0.2

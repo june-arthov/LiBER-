@@ -11,8 +11,17 @@ class ConfigLoader {
       const fileContents = fs.readFileSync(absolutePath, 'utf8');
       const config = yaml.load(fileContents);
 
-      // 2. Secret Management: Load API Key from environment or .env
-      const envKey = process.env.OLLAMA_CLOUD_API_KEY || process.env.OPENAI_API_KEY;
+      // 2. Secret Management: provider-aware key from environment or .env
+      const provider = (config.agent?.engine?.provider || 'openai').toLowerCase();
+      const KEY_ENV = {
+        openai: ['OPENAI_API_KEY', 'OLLAMA_CLOUD_API_KEY'],
+        anthropic: ['ANTHROPIC_API_KEY'],
+        gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+        ollama: ['OLLAMA_CLOUD_API_KEY', 'OPENAI_API_KEY']
+      };
+      const envNames = KEY_ENV[provider] || KEY_ENV.openai;
+
+      const envKey = envNames.map(n => process.env[n]).find(Boolean);
       if (envKey && config.agent?.engine) {
         config.agent.engine.apiKey = envKey;
       }
@@ -27,9 +36,9 @@ class ConfigLoader {
           })
         );
         
-        // Inject API Key into config if found in .env
-        const fileKey = envVars.OLLAMA_CLOUD_API_KEY || envVars.OPENAI_API_KEY;
-        if (fileKey && config.agent?.engine) {
+        // Inject API Key into config if found in .env (process env wins)
+        const fileKey = envNames.map(n => envVars[n]).find(Boolean);
+        if (fileKey && !envKey && config.agent?.engine) {
           config.agent.engine.apiKey = fileKey;
         }
       }
