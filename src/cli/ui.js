@@ -285,10 +285,11 @@ function startAgySession({ agent, port, ask, commands, getAgentInfo }) {
       ['/help', 'Display this command reference'],
       ['/status, /ps', 'Show real-time agent metrics and health'],
       ['/tools', 'List registered tool capabilities'],
-      ['/model', 'Inspect active LLM engine & parameters'],
+      ['/models', 'List all available AI models from the API endpoint'],
+      ['/model <name>', 'Switch the active AI model dynamically on the fly'],
       ['/logs [n]', 'View recent telemetry events from liber.log'],
-      ['/clear', 'Clear screen and refresh Agy banner'],
-      ['/tui', 'Launch the blessed dashboard interface'],
+      ['/clear', 'Clear screen and refresh LiBER banner'],
+      ['/tui', 'Launch the Tactical Cyber-Obsidian TUI dashboard'],
       ['/exit, /quit', 'Exit the LiBER Terminal'],
     ];
 

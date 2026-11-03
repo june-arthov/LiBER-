@@ -166,22 +166,41 @@ function getSlashCommands() {
       lines.push(C.darkDim('  ╰─' + '─'.repeat(58) + '╯\n'));
       return lines.join('\n');
     },
-    model: async () => {
-      const cfgPath = path.resolve(process.cwd(), process.env.LIBER_CONFIG || 'liber.yaml');
-      let details = 'No liber.yaml found';
-      if (fs.existsSync(cfgPath)) {
-        const yaml = require('js-yaml');
-        const doc = yaml.load(fs.readFileSync(cfgPath, 'utf8'));
-        const eng = doc.agent?.engine || {};
-        details = [
-          `Provider:    ${eng.provider || 'unknown'}`,
-          `Model:       ${eng.model || 'unknown'}`,
-          `Endpoint:    ${eng.endpoint || 'unknown'}`,
-          `Temperature: ${eng.temperature || 0.7}`,
-          `Max Tokens:  ${eng.max_tokens || 2048}`
-        ].map(l => '  ' + C.darkDim('│ ') + C.amber(l)).join('\n');
+    models: async () => {
+      try {
+        const res = await requestDaemon('/models');
+        if (!res.success) throw new Error(res.error || 'Failed to fetch models');
+        const lines = [];
+        lines.push('');
+        lines.push(C.darkDim('  ╭─ ') + C.cyan(C.bold('AVAILABLE API MODELS')) + C.darkDim(' ────────────────────────────╮'));
+        lines.push('  ' + C.darkDim('│ ') + C.dim('Active Model: ') + C.green(C.bold(res.active)));
+        lines.push('  ' + C.darkDim('├─' + '─'.repeat(52) + '┤'));
+        (res.models || []).forEach((m) => {
+          const isCurrent = m === res.active;
+          const mark = isCurrent ? C.green('● ') : C.darkDim('○ ');
+          const name = isCurrent ? C.bold(C.green(m)) : C.sky(m);
+          lines.push('  ' + C.darkDim('│ ') + mark + name);
+        });
+        lines.push('  ' + C.darkDim('├─' + '─'.repeat(52) + '┤'));
+        lines.push('  ' + C.darkDim('│ ') + C.dim('Switch: ') + C.amber('/model <model-name>'));
+        lines.push(C.darkDim('  ╰─' + '─'.repeat(52) + '╯\n'));
+        return lines.join('\n');
+      } catch (err) {
+        return `\n${C.red('✖ Failed to query models:')} ${err.message}\n`;
       }
-      return `\n${C.darkDim('  ╭─ ')}${C.amber(C.bold('ACTIVE LLM CONFIG'))}\n${details}\n${C.darkDim('  ╰─' + '─'.repeat(40))}\n`;
+    },
+    model: async (arg) => {
+      const targetModel = (arg || '').trim();
+      if (!targetModel) {
+        return await getSlashCommands().models();
+      }
+      try {
+        const res = await requestDaemon('/model/switch', 'POST', { model: targetModel });
+        if (!res.success) throw new Error(res.error || 'Switch failed');
+        return `\n${C.green('✔ Successfully switched model to:')} ${C.bold(C.sky(res.active))}\n${C.dim('  Configuration saved to liber.yaml and reloaded dynamically.')}\n`;
+      } catch (err) {
+        return `\n${C.red('✖ Model switch error:')} ${err.message}\n`;
+      }
     },
     logs: async (arg) => {
       const count = parseInt(arg || '8', 10);
@@ -291,6 +310,28 @@ program
       } else {
         // Interactive session
         await runInteractive(targetAgent);
+      }
+    } catch (err) {
+      console.error(`\n${C.red('✖ Error:')} ${err.message}\n`);
+    }
+  });
+
+// COMMAND: models / model
+program
+  .command('models [modelName]')
+  .alias('model')
+  .description('List available AI models from the API endpoint or switch active model')
+  .action(async (modelName) => {
+    try {
+      await ensureDaemon();
+      if (modelName) {
+        const res = await requestDaemon('/model/switch', 'POST', { model: modelName });
+        if (!res.success) throw new Error(res.error || 'Failed to switch model');
+        console.log(`\n${C.green('✔')} Switched active model to: ${C.bold(C.sky(res.active))}`);
+        console.log(C.dim('  Configuration saved to liber.yaml and applied in real-time.\n'));
+      } else {
+        const output = await getSlashCommands().models();
+        console.log(output);
       }
     } catch (err) {
       console.error(`\n${C.red('✖ Error:')} ${err.message}\n`);

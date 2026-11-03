@@ -37,6 +37,42 @@ class LiberDaemon {
     });
   }
 
+  async fetchAvailableModels(engine) {
+    if (!engine || !engine.endpoint || !engine.apiKey) return [];
+    try {
+      const url = `${engine.endpoint}/models`;
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${engine.apiKey}` }
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      if (Array.isArray(data.data)) {
+        return data.data.map(m => m.id);
+      }
+      if (Array.isArray(data.models)) {
+        return data.models.map(m => m.name || m.id);
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  persistModelChange(newModel) {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const cfgPath = path.resolve(process.cwd(), process.env.LIBER_CONFIG || 'liber.yaml');
+      if (fs.existsSync(cfgPath)) {
+        let raw = fs.readFileSync(cfgPath, 'utf8');
+        raw = raw.replace(/model:\s*["'][^"']+["']/, `model: "${newModel}"`);
+        fs.writeFileSync(cfgPath, raw, 'utf8');
+      }
+    } catch (e) {
+      console.error(`[liberd] Failed to update liber.yaml: ${e.message}`);
+    }
+  }
+
   async start(configPath = process.env.LIBER_CONFIG || 'liber.yaml') {
     console.log(`[liberd] Starting Liber Production-Grade Daemon...`);
     try {
@@ -81,6 +117,26 @@ class LiberDaemon {
         const { verdict } = JSON.parse(body || '{}');
         const handled = this.resolveHitl(verdict === 'approve' || verdict === true);
         res.end(JSON.stringify({ success: true, handled }));
+      }
+      else if (endpoint === '/models') {
+        const firstAgent = Array.from(this.agents.values())[0];
+        const engine = firstAgent?.config?.engine || {};
+        const models = await this.fetchAvailableModels(engine);
+        res.end(JSON.stringify({ success: true, active: engine.model, models }));
+      }
+      else if (endpoint === '/model/switch') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { model } = JSON.parse(body || '{}');
+        if (!model) throw new Error("Missing 'model' parameter.");
+
+        for (const [id, agent] of this.agents.entries()) {
+          agent.config.engine.model = model;
+          llmManager.initialize(agent.config.engine);
+        }
+
+        this.persistModelChange(model);
+        res.end(JSON.stringify({ success: true, active: model }));
       }
       else if (endpoint === '/chat/stream') {
         res.setHeader('Content-Type', 'text/event-stream');

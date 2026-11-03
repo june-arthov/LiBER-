@@ -8,7 +8,7 @@ agent:
   
   engine:
     provider: "openai" # Uses openai-adapter compatible with Ollama Cloud
-    model: "glm-5.3-flash:cloud" # Active cloud model
+    model: "kimi-k2.7-code" # Active cloud model
     endpoint: "https://ollama.com/v1" # Ollama Cloud endpoint
     apiKey: "${OLLAMA_CLOUD_API_KEY}" # Loaded automatically from .env or environment
     temperature: 0.7
