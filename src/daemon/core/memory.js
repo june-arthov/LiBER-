@@ -77,6 +77,18 @@ class MemoryManager {
     this.history.clear();
     this._save();
   }
+
+  /** Live window resize: trim existing history to the new size immediately. */
+  resize(newSize) {
+    if (!Number.isFinite(newSize) || newSize < 1) return this.windowSize;
+    this.windowSize = newSize;
+    for (const [agentId, messages] of this.history.entries()) {
+      while (messages.length > newSize) messages.shift();
+      this.history.set(agentId, messages);
+    }
+    this._save();
+    return this.windowSize;
+  }
 }
 
 module.exports = new MemoryManager();

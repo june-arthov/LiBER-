@@ -13,6 +13,7 @@ const auth = require('./core/auth');
 const policy = require('./core/policy');
 const journal = require('./core/journal');
 const modelSwitch = require('./core/model-switch');
+const configApply = require('./core/config-apply');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -67,12 +68,17 @@ class LiberDaemon {
     }
   }
 
-  persistModelChange(changes) {
+  persistConfigChanges(changes) {
     try {
       const cfgPath = path.resolve(process.cwd(), process.env.LIBER_CONFIG || 'liber.yaml');
       if (fs.existsSync(cfgPath)) {
         const raw = fs.readFileSync(cfgPath, 'utf8');
-        const patched = modelSwitch.patchEngineYaml(raw, changes);
+        // engine.* lives under the agent: section in liber.yaml.
+        const yamlChanges = {};
+        for (const [key, value] of Object.entries(changes)) {
+          yamlChanges[key.startsWith('engine.') ? `agent.${key}` : key] = value;
+        }
+        const patched = configApply.patchYamlKeys(raw, yamlChanges);
         if (patched !== raw) {
           const tmp = `${cfgPath}.tmp`;
           fs.writeFileSync(tmp, patched, 'utf8');
@@ -80,7 +86,7 @@ class LiberDaemon {
         }
       }
     } catch (e) {
-      logger.error('SYSTEM', 'MODEL_PERSIST_FAILED', { error: e.message });
+      logger.error('SYSTEM', 'CONFIG_PERSIST_FAILED', { error: e.message });
     }
   }
 
@@ -103,7 +109,9 @@ class LiberDaemon {
         config: {
           ...config.agent,
           grounding: config.grounding || {},
-          skills: config.skills || {}
+          skills: config.skills || {},
+          limits: config.limits || {},
+          memory: config.memory || {}
         },
         status: 'RUNNING',
         startTime: Date.now(),
@@ -233,6 +241,66 @@ class LiberDaemon {
         const handled = this.resolveHitl(verdict === 'approve' || verdict === true);
         res.end(JSON.stringify({ success: true, handled }));
       }
+      else if (endpoint === '/config') {
+        if (req.method === 'GET') {
+          const first = Array.from(this.agents.values())[0];
+          res.end(JSON.stringify({
+            success: true,
+            config: configApply.sanitizeConfig(first?.config, this.traceEnabled, process.cwd())
+          }));
+          return;
+        }
+
+        // POST: whitelisted live updates, applied to every agent and persisted.
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { changes, error } = configApply.validateConfigUpdate(JSON.parse(body || '{}'));
+        if (error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error }));
+          return;
+        }
+
+        const engineTouched = Object.keys(changes).some(k => k.startsWith('engine.'));
+        for (const [id, agent] of this.agents.entries()) {
+          const cfg = agent.config;
+          for (const [p, value] of Object.entries(changes)) {
+            const [top, ...rest] = p.split('.');
+            if (top === 'engine') {
+              cfg.engine = { ...cfg.engine, [rest[0]]: value };
+            } else if (top === 'grounding') {
+              cfg.grounding = { ...cfg.grounding, [rest[0]]: value };
+            } else if (top === 'limits') {
+              cfg.limits = { ...cfg.limits, [rest[0]]: value };
+            } else if (top === 'memory') {
+              cfg.memory = { ...cfg.memory, [rest[0]]: value };
+              if (rest[0] === 'window_size') memory.resize(value);
+            } else if (top === 'telemetry') {
+              if (rest[0] === 'trace') this.traceEnabled = !!value;
+            } else if (top === 'policy') {
+              const pol = policy.current();
+              policy.configure({
+                write_roots: pol.write_roots,
+                allow_outside_workspace: pol.allow_outside_workspace,
+                terminal: { ...pol.terminal, [rest[1]]: value }
+              });
+            }
+          }
+          if (engineTouched) {
+            const key = ConfigLoader.resolveApiKey(cfg.engine.provider, cfg.engine.endpoint);
+            if (key) cfg.engine.apiKey = key;
+            llmManager.initialize(cfg.engine);
+          }
+        }
+
+        this.persistConfigChanges(changes);
+
+        const first = Array.from(this.agents.values())[0];
+        res.end(JSON.stringify({
+          success: true,
+          applied: configApply.sanitizeConfig(first?.config, this.traceEnabled, process.cwd())
+        }));
+      }
       else if (endpoint === '/models') {
         const firstAgent = Array.from(this.agents.values())[0];
         const engine = firstAgent?.config?.engine || {};
@@ -264,7 +332,7 @@ class LiberDaemon {
           changed[id] = { ...modelSwitch.sanitizeEngine(engine), key_resolved: !!key };
         }
 
-        this.persistModelChange({ provider: spec.provider, model: spec.model, endpoint: spec.endpoint });
+        this.persistConfigChanges({ 'engine.provider': spec.provider, 'engine.model': spec.model, 'engine.endpoint': spec.endpoint });
 
         const first = Array.from(this.agents.values())[0];
         res.end(JSON.stringify({
