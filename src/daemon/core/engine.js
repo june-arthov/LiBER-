@@ -9,6 +9,7 @@ const skills = require('./skills');
 const budget = require('./budget');
 const verifier = require('./verifier');
 const journal = require('./journal');
+const injection = require('./injection');
 
 const DEFAULT_GROUNDING = {
   enabled: true,
@@ -717,6 +718,11 @@ class MerlinEngine {
 
         const ev = ledger.record(call.name, call.args, result, { denied });
         const outStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+        const injectionWarning = injection.scan(outStr) ? `\n${injection.WARNING}\n` : '';
+        if (injectionWarning) {
+          onEvent('injection_warning', { tool: call.name, evidence: ev.id });
+          logger.warn(agentId, 'INJECTION_WARNING', { tool: call.name, evidence: ev.id });
+        }
 
         onEvent('observation', {
           evidence: ev.id,
@@ -728,7 +734,7 @@ class MerlinEngine {
           approved: !denied
         });
 
-        const observation = `OBSERVATION [${ev.id}] ${call.name} ${ev.ok ? 'OK' : 'FAILED'}${ev.exit_code !== null ? ` (exit ${ev.exit_code})` : ''}: ${outStr}`;
+        const observation = `OBSERVATION [${ev.id}] ${call.name} ${ev.ok ? 'OK' : 'FAILED'}${ev.exit_code !== null ? ` (exit ${ev.exit_code})` : ''}:${injectionWarning}${outStr}`;
         // Observations are tool results: deliver as user turns, never mid-conversation system
         // messages (several providers drop those silently and re-issue the same call forever).
         memory.add(agentId, 'user', observation);

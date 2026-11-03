@@ -35,6 +35,8 @@ LiBER agents are equipped with Merlin's core toolsets:
 | `search_files` | Recursive regex content search and file globbing |
 | `terminal` | PowerShell / Bash host shell execution with timeout and output capture |
 | `fetch_url` | HTTP(S) fetch with HTML→text extraction — ground external claims instead of guessing |
+| `web_search` | Keyless web search (DuckDuckGo → SearXNG fallback) returning titles/URLs/snippets |
+| `task` / `tasks` | Subagent orchestration: one isolated child turn, or up to 4 in parallel |
 | `todo_list` | Structured multi-step task planning and dependency tracking |
 | `memory` | Persistent cross-session knowledge bank (`.liber_memory.json`) |
 
@@ -136,8 +138,9 @@ the cited receipt actually entails it. It is still not a proof system: the seman
 subtle unsupported claims or flag supported ones, and a verifier outage fails open (recorded as
 `semantic: error`, never silently as `pass`).
 
-Run the enforcement suite with `npm test` (105 tests, including a scripted model that hallucinates,
-gets blocked, and is forced to read the file before answering).
+Run the enforcement suite with `npm test` (136 tests, including a scripted model that hallucinates,
+gets blocked, and is forced to read the file before answering, plus a 15-case grounding regression
+dataset). CI runs the suite on Linux and Windows via `.github/workflows/ci.yml`.
 
 ## 📚 Skill Library
 
@@ -161,6 +164,9 @@ Shipped skills: `iron-law` (always), `grounding-protocol` (always), `systematic-
 | Capability | Behaviour |
 |---|---|
 | Daemon auth | Every endpoint except `/healthz` requires `Authorization: Bearer <token>`; the token lives in `.liber/daemon.token` and is read by the CLI/TUI. |
+| Turn serialization | One turn at a time per agent — simultaneous chats queue instead of interleaving observations into each other's context. |
+| Deterministic receipt checks | A cited receipt must actually mention the file and contain the numbers claimed — enforced by code, no model involved. |
+| Injection defense | `fetch_url` output is wrapped in an `UNTRUSTED` marker, instruction-like tool output is flagged and labelled DATA ONLY, and the doctrine forbids obeying content. |
 | Write policy | `write_file` / `patch` are confined to `policy.write_roots`; writes outside the workspace are refused unless explicitly enabled. The shell is **not** sandboxed. |
 | Native tool calling | `engine.native_tools: true` uses the provider's tool API with canonical assistant/tool messages; falls back to the text protocol if the provider rejects it. |
 | Budget guard | `limits.max_tokens_per_day` and (when prices are set) `max_cost_per_day` are enforced before every model call; state in `.liber/budget.json`. |

@@ -111,3 +111,29 @@ test('annotation never hides the unresolved claims', () => {
   assert.match(out, /GROUNDING AUDIT/);
   assert.match(out, /I fixed the bug/);
 });
+
+test('a cited receipt that never mentions the file is rejected deterministically', () => {
+  const ledger = new EvidenceLedger('d1');
+  const ev = ledger.record('read_file', { path: 'src/other.js' }, { content: '1 | x', total_lines: 1, lines_read: 1 });
+  const r = grounding.audit(`package.json declares version 0.1.0 [${ev.id}].`, ledger);
+  assert.equal(r.passed, false, JSON.stringify(r.violations));
+  assert.ok(r.violations.some(v => v.code === 'PATH_UNSUPPORTED'));
+});
+
+test('a cited receipt that never contains the number is rejected deterministically', () => {
+  const ledger = new EvidenceLedger('d2');
+  const ev = ledger.record('read_file', { path: 'package.json' }, { content: '1 | {"version":"0.1.0"}', total_lines: 1, lines_read: 1 });
+  const r = grounding.audit(`package.json declares version 9.9.9 [${ev.id}].`, ledger);
+  assert.equal(r.passed, false, JSON.stringify(r.violations));
+  assert.ok(r.violations.some(v => v.code === 'NUMBER_UNSUPPORTED'));
+});
+
+test('aggregated task receipts support child findings without path checks', () => {
+  const ledger = new EvidenceLedger('d3');
+  const ev = ledger.record('task', { goal: 'check version' }, {
+    mode: 'single',
+    result: { response: 'package.json version is 0.1.0 [E1]', grounded: true }
+  });
+  const r = grounding.audit(`package.json version is 0.1.0 [${ev.id}].`, ledger);
+  assert.equal(r.passed, true, JSON.stringify(r.violations));
+});

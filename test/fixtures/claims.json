@@ -1,0 +1,119 @@
+{
+  "cases": [
+    {
+      "id": "uncited-version",
+      "answer": "package.json declares version 9.9.9.",
+      "receipts": [],
+      "expect": "fail",
+      "codes": ["UNCITED_CLAIM"]
+    },
+    {
+      "id": "cited-real",
+      "answer": "package.json declares version 0.1.0 [E1].",
+      "receipts": [
+        { "tool": "read_file", "args": { "path": "package.json" }, "result": { "content": "1 | {\"version\":\"0.1.0\"}", "total_lines": 1, "lines_read": 1 } }
+      ],
+      "expect": "pass"
+    },
+    {
+      "id": "cited-wrong-number",
+      "answer": "package.json declares version 9.9.9 [E1].",
+      "receipts": [
+        { "tool": "read_file", "args": { "path": "package.json" }, "result": { "content": "1 | {\"version\":\"0.1.0\"}", "total_lines": 1, "lines_read": 1 } }
+      ],
+      "expect": "fail",
+      "codes": ["NUMBER_UNSUPPORTED"]
+    },
+    {
+      "id": "cited-wrong-path",
+      "answer": "src/other.js declares version 0.1.0 [E1].",
+      "receipts": [
+        { "tool": "read_file", "args": { "path": "package.json" }, "result": { "content": "1 | {\"version\":\"0.1.0\"}", "total_lines": 1, "lines_read": 1 } }
+      ],
+      "expect": "fail",
+      "codes": ["PATH_UNSUPPORTED"]
+    },
+    {
+      "id": "hedged",
+      "answer": "UNVERIFIED: package.json may declare 9.9.9 — no receipt.",
+      "receipts": [],
+      "expect": "pass"
+    },
+    {
+      "id": "knowledge",
+      "answer": "Array.prototype.map returns a new array in JavaScript.",
+      "receipts": [],
+      "expect": "pass"
+    },
+    {
+      "id": "phantom-action",
+      "answer": "I fixed the bug.",
+      "receipts": [],
+      "expect": "fail",
+      "codes": ["PHANTOM_ACTION"]
+    },
+    {
+      "id": "success-no-exec",
+      "answer": "All tests pass [E1].",
+      "receipts": [
+        { "tool": "read_file", "args": { "path": "package.json" }, "result": { "content": "{}", "total_lines": 1, "lines_read": 1 } }
+      ],
+      "expect": "fail",
+      "codes": ["UNVERIFIED_SUCCESS"]
+    },
+    {
+      "id": "success-exec",
+      "answer": "All tests pass [E1].",
+      "receipts": [
+        { "tool": "terminal", "args": { "command": "npm test" }, "result": { "exit_code": 0, "output": "45 pass" } }
+      ],
+      "expect": "pass"
+    },
+    {
+      "id": "citation-missing",
+      "answer": "package.json declares version 0.1.0 [E9].",
+      "receipts": [],
+      "expect": "fail",
+      "codes": ["CITATION_UNKNOWN"]
+    },
+    {
+      "id": "code-block-exempt",
+      "answer": "Example:\n```\npackage.json declares version 9.9.9\n```",
+      "receipts": [],
+      "expect": "pass"
+    },
+    {
+      "id": "user-attributed",
+      "answer": "You said package.json declares 9.9.9.",
+      "receipts": [],
+      "expect": "pass"
+    },
+    {
+      "id": "pending-mutation",
+      "answer": "I created src/app.js [E1].",
+      "receipts": [
+        { "tool": "write_file", "args": { "path": "src/app.js", "content": "x" }, "result": { "success": true, "bytes_written": 1 } }
+      ],
+      "expect": "fail",
+      "codes": ["PENDING_MUTATION_UNVERIFIED"]
+    },
+    {
+      "id": "readback",
+      "answer": "I created src/app.js [E2].",
+      "receipts": [
+        { "tool": "write_file", "args": { "path": "src/app.js", "content": "x" }, "result": { "success": true, "bytes_written": 1 } },
+        { "tool": "read_file", "args": { "path": "src/app.js" }, "result": { "content": "1 | x", "total_lines": 1, "lines_read": 1 } }
+      ],
+      "expect": "pass"
+    },
+    {
+      "id": "version-needs-command",
+      "answer": "The current version is 1.0.0 [E1].",
+      "receipts": [
+        { "tool": "read_file", "args": { "path": "package.json" }, "result": { "content": "1 | {\"version\":\"0.1.0\"}", "total_lines": 1, "lines_read": 1 } }
+      ],
+      "expect": "fail",
+      "codes": ["UNGROUNDED_FACT"]
+    }
+  ]
+}

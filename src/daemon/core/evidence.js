@@ -11,6 +11,7 @@ const KIND_BY_TOOL = {
   memory: 'memory',
   todo_list: 'todo',
   fetch_url: 'fetch',
+  web_search: 'search',
   task: 'task',
   tasks: 'task'
 };
@@ -81,7 +82,7 @@ class EvidenceLedger {
       case 'command':
         return args.command || null;
       case 'search':
-        return args.pattern || null;
+        return args.pattern || args.query || null;
       case 'fetch':
         return result.final_url || args.url || null;
       case 'memory':
@@ -101,7 +102,7 @@ class EvidenceLedger {
       case 'patch':
         return `strategy=${result.strategy || '?'} · ${result.occurrences_replaced ?? 0} replaced`;
       case 'search':
-        return `${result.total_found ?? 0} matches`;
+        return `${result.total_found ?? result.total ?? 0} matches`;
       case 'command':
         return `exit ${result.exit_code} · ${String(result.output || result.error || '').replace(/\s+/g, ' ').slice(0, 160)}`;
       case 'fetch':
@@ -128,7 +129,7 @@ class EvidenceLedger {
       case 'patch':
         return String(result.diff_preview || result.message || '').slice(0, 700);
       case 'search':
-        return JSON.stringify((result.matches || []).slice(0, 5)).slice(0, 700);
+        return JSON.stringify((result.matches || result.results || []).slice(0, 5)).slice(0, 700);
       case 'fetch':
         return String(result.content || '').slice(0, 700);
       case 'memory':

@@ -10,6 +10,7 @@ const trace = require('./core/trace');
 const auth = require('./core/auth');
 const policy = require('./core/policy');
 const journal = require('./core/journal');
+const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
 class LiberDaemon {
@@ -18,6 +19,7 @@ class LiberDaemon {
     this.port = 4567;
     this.server = null;
     this.hitlPending = null; // { resolve, agentId, command }
+    this.queue = new AgentQueue(); // one turn at a time per agent
   }
 
   resolveHitl(approved) {
@@ -179,13 +181,13 @@ class LiberDaemon {
         if (!this.agents.has(id)) throw new Error(`Agent ${id} not found`);
 
         const agent = this.agents.get(id);
-        const result = await merlinEngine.resume(id, {
+        const result = await this.queue.run(id, () => merlinEngine.resume(id, {
           agentConfig: agent.config,
           memory,
           llmManager,
           onEvent: () => {},
           maxLoops: this.maxLoops
-        });
+        }));
 
         if (result && result.response && this.traceEnabled) {
           trace.appendTurn({ agentId: id, userMessage: '(resumed turn)', result, model: agent.config.engine?.model });
@@ -241,7 +243,7 @@ class LiberDaemon {
 
         const agent = this.agents.get(agentId);
         try {
-          const result = await merlinEngine.runTurn({
+          const result = await this.queue.run(agentId, () => merlinEngine.runTurn({
             agentId,
             agentConfig: agent.config,
             userMessage: message,
@@ -250,7 +252,7 @@ class LiberDaemon {
             onEvent: sendEvent,
             waitForHitl: (aid, toolName, args) => this.waitForHitl(aid, `${toolName}: ${JSON.stringify(args)}`),
             maxLoops: this.maxLoops
-          });
+          }));
           if (this.traceEnabled) {
             trace.appendTurn({ agentId, userMessage: message, result, model: agent.config.engine?.model });
           }
@@ -267,7 +269,7 @@ class LiberDaemon {
         if (!this.agents.has(agentId)) throw new Error(`Agent ${agentId} not found`);
         const agent = this.agents.get(agentId);
 
-        const result = await merlinEngine.runTurn({
+        const result = await this.queue.run(agentId, () => merlinEngine.runTurn({
           agentId,
           agentConfig: agent.config,
           userMessage: message,
@@ -275,7 +277,7 @@ class LiberDaemon {
           llmManager,
           waitForHitl: () => Promise.resolve(true),
           maxLoops: this.maxLoops
-        });
+        }));
 
         if (this.traceEnabled) {
           trace.appendTurn({ agentId, userMessage: message, result, model: agent.config.engine?.model });

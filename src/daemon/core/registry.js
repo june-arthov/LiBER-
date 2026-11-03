@@ -3,7 +3,7 @@ const { readFile, writeFile, patchFile, searchFiles } = require('./tools/file-to
 const { runTerminal, isCommandSensitive } = require('./tools/terminal-tool');
 const { manageTodo } = require('./tools/todo-tool');
 const { manageMemory } = require('./tools/memory-tool');
-const { fetchUrl } = require('./tools/web-tool');
+const { fetchUrl, searchWeb } = require('./tools/web-tool');
 const { manageSkill, ACTIONS: SKILL_ACTIONS } = require('./tools/skill-tool');
 const { TASK_TOOLS } = require('./tools/task-tool');
 const { validateArgs } = require('./validate');
@@ -170,6 +170,21 @@ class ToolRegistry {
 
     // 10. task / tasks — subagent orchestration (executed by the engine)
     for (const def of TASK_TOOLS) this.register(def);
+
+    // 11. web_search — keyless search; verify important facts with fetch_url
+    this.register({
+      name: 'web_search',
+      description: 'Search the web and return titles, URLs and snippets. Treat results as pointers; verify any important fact by fetching the primary source with fetch_url and citing the receipt.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query' },
+          max: { type: 'integer', description: 'Maximum results (default 8, max 10)' }
+        },
+        required: ['query']
+      },
+      handler: searchWeb
+    });
   }
 
   register(def) {

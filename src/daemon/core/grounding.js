@@ -141,12 +141,66 @@ function successSupport(sentence, ledger) {
   return ledger.okEntries().length > 0 ? 'ok' : 'none';
 }
 
+/**
+ * Deterministic receipt checks — no model involved.
+ * A cited receipt must actually mention the path and contain the numbers claimed.
+ */
+function pathMatchesEntry(entry, token) {
+  const base = String(token).split(/[\\/]/).pop().toLowerCase();
+  const needle = String(token).toLowerCase();
+  const hay = `${entry.target || ''} ${entry.detail || ''}`.toLowerCase();
+  return hay.includes(base) || hay.includes(needle);
+}
+
+function deterministicCheck(sentence, cites, ledger) {
+  const violations = [];
+  const stripped = String(sentence).replace(/\[E\d+\]/gi, ' ');
+  const paths = [...stripped.matchAll(PATH_GLOBAL)].map(m => m[0]);
+  const numbers = [...stripped.matchAll(/\b\d[\d.,]*\b/g)].map(m => m[0]);
+  const entries = cites.map(id => ledger.get(id)).filter(Boolean);
+  if (!entries.length) return violations;
+
+  if (paths.length) {
+    const pathKinds = new Set(['read', 'write', 'patch', 'search', 'command', 'fetch']);
+    const checkable = entries.filter(e => pathKinds.has(e.kind));
+    const supported = checkable.length > 0 && paths.some(p => checkable.some(e => pathMatchesEntry(e, p)));
+    if (!supported && checkable.length > 0) {
+      violations.push({
+        code: 'PATH_UNSUPPORTED',
+        text: sentence,
+        hint: `The cited receipt does not mention '${paths[0]}'. Cite the receipt that actually read it, or mark the claim UNVERIFIED.`
+      });
+    }
+  }
+
+  if (numbers.length) {
+    // Aggregated receipts (search/todo/task) cannot contain arbitrary numbers — skip them.
+    const checkable = entries.filter(e => !['search', 'todo', 'task'].includes(e.kind));
+    if (checkable.length) {
+      const found = numbers.some(n =>
+        checkable.some(e => `${e.detail || ''} ${e.excerpt || ''} ${e.target || ''}`.includes(n))
+      );
+      if (!found) {
+        violations.push({
+          code: 'NUMBER_UNSUPPORTED',
+          text: sentence,
+          hint: `The cited receipt does not contain the number '${numbers[0]}'. Re-check the receipt, verify it with a tool, or mark the claim UNVERIFIED.`
+        });
+      }
+    }
+  }
+
+  return violations;
+}
+
 const FIX_HINTS = {
   UNCITED_CLAIM: 'Cite the receipt that proves it (`[E#]`), or rewrite the sentence as `UNVERIFIED: ...`. If no receipt exists, call the tool that produces one.',
   CITATION_UNKNOWN: 'That receipt ID does not exist. Use only IDs listed in the Evidence Ledger.',
   PHANTOM_ACTION: 'No receipt matches this action. Perform it with a tool and cite the result, or remove the claim.',
   UNVERIFIED_SUCCESS: 'Run the verification (read_file read-back, or a test/build run) and cite it, or state plainly that the work is unverified.',
   SEMANTIC_UNSUPPORTED: 'The cited receipt does not entail this claim. Verify it with a tool, remove it, or mark it UNVERIFIED.',
+  PATH_UNSUPPORTED: 'The cited receipt does not mention that file. Cite the receipt that actually read it, or mark the claim UNVERIFIED.',
+  NUMBER_UNSUPPORTED: 'The cited receipt does not contain that number. Re-check the receipt, verify with a tool, or mark the claim UNVERIFIED.',
   PENDING_MUTATION_UNVERIFIED: 'A file was changed but never read back. Call read_file on each changed path (or run the test suite), then cite the receipt.',
   UNGROUNDED_FACT: 'Verify with terminal (`date`, `<tool> --version`) or fetch_url of the primary source, then cite it.'
 };
@@ -210,9 +264,15 @@ function audit(text, ledger, opts = {}) {
       }
 
       if (env && env.type === 'version') {
-        const supported = ledger.entries.some(e => e.ok && (e.kind === 'command' || e.kind === 'fetch'));
+        const supported = ledger.entries.some(e => e.ok && (e.kind === 'command' || e.kind === 'fetch' || e.tool === 'web_search'));
         if (!supported) {
           add('UNGROUNDED_FACT', sentence, FIX_HINTS.UNGROUNDED_FACT, li + 1);
+        }
+      }
+
+      if (cites.length) {
+        for (const v of deterministicCheck(sentence, cites, ledger)) {
+          add(v.code, sentence, v.hint, li + 1);
         }
       }
 
