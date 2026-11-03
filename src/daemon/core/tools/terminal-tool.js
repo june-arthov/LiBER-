@@ -8,7 +8,7 @@ const DESTRUCTIVE_PATTERNS = [
   /\brm\s+(-rf?|-fr?)/i,
   /\bdel\s+(\/s|\/f|\/q)/i,
   /\brmdir\s+\/s/i,
-  /\bformat\b/i,
+  /\bformat\s+\S/i,
   /\bdrop\s+(database|table)\b/i,
   /\btruncate\s+table\b/i,
   /\bchmod\s+-R\s+777\b/i,
@@ -35,7 +35,7 @@ const MUTATION_PATTERNS = [
   /\b(rm|del|erase|rmdir|mv|move|ren|rename|cp|copy|scp|rsync)\b/i,
   /\b(set-content|out-file|add-content|new-item|remove-item|move-item|copy-item|rename-item|set-item)\b/i,
   /\b(chmod|chown|sudo)\b/i,
-  /\b(format|diskpart|reg|bcdedit|netsh|schtasks|sc\s)\b/i,
+  /\b(format\s+\S|diskpart|reg|bcdedit|netsh|schtasks|sc\s)/i,
   />>\s*\S/,
   /(^|[\s])>\s*\S/,
   /\b(tee|clip)\b/i

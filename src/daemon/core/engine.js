@@ -536,6 +536,23 @@ class LiberEngine {
       if (!hasNativeCalls && (explicitFinal !== null || textToolCalls.length === 0)) {
         const candidate = explicitFinal !== null ? explicitFinal : this.cleanAnswer(response);
 
+        // An empty answer cannot be audited or delivered — nudge and retry
+        // instead of shipping a bogus "execution limit" report.
+        if (!String(candidate || '').trim()) {
+          const nudge = [
+            'You returned an empty response with no tool calls. That cannot be delivered.',
+            'Produce your answer as [FINAL: ...] citing receipts, or keep working with tools.'
+          ].join(' ');
+          memory.add(agentId, 'user', nudge);
+          messages.push({ role: 'user', content: nudge });
+          trace.push({ type: 'loop_guard', tool: 'empty-answer' });
+          onEvent('loop_guard', { tool: 'empty-answer' });
+          circuitBreaker.increment(agentId);
+          iteration++;
+          persistTurn();
+          continue;
+        }
+
         let verdict = cfg.enabled
           ? grounding.audit(candidate, ledger, {
               requireReadback: cfg.require_readback,
@@ -757,7 +774,9 @@ class LiberEngine {
     if (!finalResponse) {
       const pending = ledger.unresolvedPending();
       finalResponse = [
-        `Execution limit reached (${iteration}/${maxLoops}) without a verified final answer.`,
+        iteration >= maxLoops
+          ? `Execution limit reached (${iteration}/${maxLoops}) without a verified final answer.`
+          : `Turn ended after ${iteration} iteration${iteration === 1 ? '' : 's'} without a verified final answer.`,
         'No completion is claimed.',
         `Receipts: ${ledger.entries.length ? ledger.entries.map(e => e.id).join(', ') : 'none'}.`,
         pending.length ? `Changed but unverified: ${pending.map(p => p.path).join(', ')}.` : ''

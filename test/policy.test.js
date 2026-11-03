@@ -89,3 +89,15 @@ test('terminal denylist wins in every mode', () => {
   assert.equal(evaluatePolicy('shutdown /s').denied, true);
   assert.equal(evaluatePolicy('dir').denied, false);
 });
+
+test('read-only terminal policy allows read-only PowerShell cmdlets', () => {
+  const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'read_only', allowlist: ['npm test'], denylist: [] } });
+
+  // Format-Table is a read-only formatter — the 'format' pattern must not block it.
+  const listing = 'Get-ChildItem -Path G:\\repo -Force | Select-Object Mode,Length,Name | Format-Table -AutoSize';
+  assert.equal(evaluatePolicy(listing).denied, false, 'read-only listing must pass');
+
+  // 'format C:' still requires an argument and remains blocked.
+  assert.equal(evaluatePolicy('format C:').denied, true);
+});

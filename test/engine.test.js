@@ -175,6 +175,34 @@ test('loop exhaustion reports honestly instead of claiming completion', async ()
   assert.match(res.response, /No completion is claimed/);
 });
 
+test('an empty model answer is nudged and retried, not reported as limit reached', async () => {
+  let calls = 0;
+  const llm = {
+    async generate(messages) {
+      calls++;
+      const last = messages[messages.length - 1];
+      if (last.role === 'user' && /empty response/.test(String(last.content))) {
+        return '[FINAL: nothing to add]';
+      }
+      return '   ';
+    }
+  };
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-empty',
+    agentConfig: cfg(),
+    userMessage: 'say something',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 4
+  });
+  assert.match(res.response, /nothing to add/);
+  assert.equal(res.iterations, 1, 'the nudge consumed one retry; the final answer breaks the loop');
+  assert.ok(events.some(ev => ev.e === 'loop_guard' && ev.d.tool === 'empty-answer'));
+  assert.ok(!/Execution limit reached/.test(res.response), 'must not claim the limit was reached');
+});
+
 test('observations are delivered as user turns, never mid-conversation system turns', async () => {
   const seen = [];
   const llm = {

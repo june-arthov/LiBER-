@@ -69,3 +69,19 @@ test('skill definitions are registered and only writes require approval', () => 
   assert.equal(registry.isSensitive('skill', { action: 'create' }), true);
   assert.equal(registry.isSensitive('skill', { action: 'update' }), true);
 });
+
+test('search_files treats a bare * as match-all in files mode', async () => {
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'liber-search-'));
+  fs.writeFileSync(path.join(dir, 'alpha.js'), 'x');
+  fs.writeFileSync(path.join(dir, 'beta.md'), 'y');
+
+  const res = await registry.execute('search_files', { pattern: '*', target: 'files', path: dir, limit: 10 });
+  assert.equal(res.error, undefined, JSON.stringify(res));
+  assert.ok(res.total_found >= 2);
+  assert.ok(res.matches.some(m => String(m.file).includes('alpha.js')));
+});
+
+test('search_files reports an invalid content regex as a clean error', async () => {
+  const res = await registry.execute('search_files', { pattern: '(', target: 'content', path: process.cwd(), limit: 5 });
+  assert.match(String(res.error || ''), /Invalid regular expression/);
+});

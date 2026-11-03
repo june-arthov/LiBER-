@@ -162,6 +162,21 @@ function generateDiff(oldStr, newStr) {
 }
 
 // 4. SEARCH FILES (Grep content or find file paths)
+function globToRegex(glob) {
+  // Plain glob handling: '*'/'**'/'.*' mean "everything"; otherwise escape
+  // regex metacharacters and translate the two glob wildcards.
+  const g = String(glob || '');
+  if (g === '*' || g === '**' || g === '.*' || g === '') return null;
+  try {
+    return new RegExp(
+      g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.'),
+      'i'
+    );
+  } catch {
+    return null;
+  }
+}
+
 async function searchFiles({ pattern, path: dirPath = ".", target = "content", file_glob = null, limit = 50 }) {
   const root = resolvePath(dirPath);
   if (!fs.existsSync(root)) {
@@ -170,8 +185,19 @@ async function searchFiles({ pattern, path: dirPath = ".", target = "content", f
 
   const results = [];
   const maxResults = Math.min(parseInt(limit, 10) || 50, 200);
-  const regex = new RegExp(pattern, 'i');
-  const globRegex = file_glob ? new RegExp(file_glob.replace(/\*/g, '.*'), 'i') : null;
+  let regex;
+  try {
+    regex = new RegExp(pattern, 'i');
+  } catch (err) {
+    // A bare '*' or other glob shape is not a valid regex — in files mode
+    // treat it as a glob; in content mode report a clean, actionable error.
+    if (target === 'files') {
+      regex = globToRegex(pattern);
+    } else {
+      return { error: `Invalid regular expression: ${pattern} — ${err.message}. Fix the pattern and retry.` };
+    }
+  }
+  const globRegex = file_glob ? globToRegex(file_glob) : null;
 
   const IGNORE_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.venv', '__pycache__', '.pytest_cache']);
 
@@ -197,7 +223,7 @@ async function searchFiles({ pattern, path: dirPath = ".", target = "content", f
         if (globRegex && !globRegex.test(entry.name)) continue;
 
         if (target === "files") {
-          if (regex.test(relPath) || regex.test(entry.name)) {
+          if (regex === null || regex.test(relPath) || regex.test(entry.name)) {
             results.push({ file: relPath });
           }
         } else {
