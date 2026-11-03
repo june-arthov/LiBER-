@@ -1,6 +1,6 @@
 # ◢ L I B E R ◣
 > **Minimalist-Utilitarian AI Agent Orchestrator**  
-> *Powered by the Merlin Cognitive Engine & Tactical Cyber-Obsidian Harness*
+> *An original, self-contained harness — its own cognitive engine, no third-party agent framework.*
 
 [![Node.js](https://img.shields.io/badge/Node.js-v20%2B-green.svg)](https://nodejs.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org/)
@@ -13,10 +13,10 @@
 
 **LiBER** is a high-performance, autonomous AI agent orchestrator designed for precision software engineering, DevOps automation, and multi-step task execution.
 
-Infused with the **Merlin Agent Cognitive Core** (`G:\Merlin Agent\Merlin-Agent`), LiBER delivers:
+LiBER is an original codebase — not a fork of, and containing no code from, Hermes Agent (Nous Research) or any other agent framework. It delivers:
 - **Zero-Filler Directness:** High-density technical execution without conversational fluff.
 - **Cognitive Pulse (`[THOUGHT: ...]`)**: Pre-action reasoning before invoking tools.
-- **Merlin Tool Suite:** First-class surgical file manipulation, fuzzy patching, command execution, structured planning, and cross-session memory.
+- **Tool Suite:** First-class surgical file manipulation, fuzzy patching, command execution, structured planning, and cross-session memory.
 - **Dual Surface:**
   - **LiBER Terminal:** Clean VT100/TrueColor streaming CLI interface.
   - **Tactical Cyber-Obsidian TUI:** Full Textual + Rich reactive telemetry dashboard with Human-In-The-Loop (HITL) safety breakpoints.
@@ -25,7 +25,7 @@ Infused with the **Merlin Agent Cognitive Core** (`G:\Merlin Agent\Merlin-Agent`
 
 ## 🛠️ Tool Ecosystem
 
-LiBER agents are equipped with Merlin's core toolsets:
+LiBER agents are equipped with a first-class toolset:
 
 | Tool | Capability |
 |---|---|
@@ -241,7 +241,7 @@ When intercepted, execution pauses and alerts the operator:
             │ HTTP / Server-Sent Events (SSE)
             ▼
 [Liber Daemon (liberd)]
-  ├─ Merlin Engine (Autonomous Turn Loop)
+  ├─ Liber Engine (Autonomous Turn Loop)
   ├─ Cognitive Pulse (Reasoning Parser)
   ├─ Tool Registry (file, terminal, todo, memory)
   ├─ Circuit Breaker & Self-Healing Guard

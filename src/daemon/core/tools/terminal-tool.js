@@ -1,4 +1,4 @@
-// src/daemon/core/tools/terminal-tool.js — Merlin Terminal Execution Engine
+// src/daemon/core/tools/terminal-tool.js — Liber Terminal Execution Engine
 const { exec } = require('child_process');
 const path = require('path');
 const policy = require('../policy');

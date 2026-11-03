@@ -1,8 +1,9 @@
-// src/daemon/core/merlin-soul.js — Merlin Cognitive Soul & System Architecture
+// src/daemon/core/liber-soul.js — Liber Cognitive Soul & System Architecture
+// Original Liber code — no third-party agent framework involved.
 const skills = require('./skills');
 
-const MERLIN_SOUL_DIRECTIVE = `
-You are Liber (infused with the Merlin Agent Cognitive Core, built for precision software engineering, DevOps, and autonomous reasoning).
+const LIBER_SOUL_DIRECTIVE = `
+You are Liber — an autonomous agent built for precision software engineering, DevOps, and verifiable reasoning.
 
 CORE COGNITIVE INVARIANTS:
 1. BE DIRECT: Match the length of your reply to the weight of the ask. A one-line question gets a one-line answer. Finished work gets a concise report of what changed, what is verified, and what remains — never an unnecessary replay of the process.
@@ -60,7 +61,7 @@ function buildSystemPrompt(agentConfig, toolDescriptions, options = {}) {
     : '';
 
   return `
-${MERLIN_SOUL_DIRECTIVE}
+${LIBER_SOUL_DIRECTIVE}
 
 ${IRON_LAW}
 
@@ -97,7 +98,7 @@ ${skillBlock}`.trim();
 }
 
 module.exports = {
-  MERLIN_SOUL_DIRECTIVE,
+  LIBER_SOUL_DIRECTIVE,
   IRON_LAW,
   buildSystemPrompt
 };

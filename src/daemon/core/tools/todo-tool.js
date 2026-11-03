@@ -1,4 +1,4 @@
-// src/daemon/core/tools/todo-tool.js — Merlin Task Planning & Tracking Tool
+// src/daemon/core/tools/todo-tool.js — Liber Task Planning & Tracking Tool
 class TodoManager {
   constructor() {
     this.tasks = [];

@@ -9,7 +9,7 @@ const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'liber-s
 process.chdir(tmp);
 
 const skills = require('../src/daemon/core/skills');
-const { buildSystemPrompt } = require('../src/daemon/core/merlin-soul');
+const { buildSystemPrompt } = require('../src/daemon/core/liber-soul');
 const { EvidenceLedger } = require('../src/daemon/core/evidence');
 
 test('ships the full core skill library', () => {

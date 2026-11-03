@@ -1,4 +1,4 @@
-// src/daemon/core/tools/file-tools.js — Merlin-Grade File Tools
+// src/daemon/core/tools/file-tools.js — Liber File Tools
 const fs = require('fs');
 const path = require('path');
 const policy = require('../policy');
@@ -90,7 +90,7 @@ async function writeFile({ path: filePath, content = "" }) {
   };
 }
 
-// 3. PATCH (Merlin-grade surgical search-and-replace with fuzzy whitespace match & diff)
+// 3. PATCH (surgical search-and-replace with fuzzy whitespace match & diff)
 async function patchFile({ path: filePath, old_string, new_string, replace_all = false }) {
   const guard = policy.checkWrite(filePath);
   if (!guard.allowed) {

@@ -1,8 +1,8 @@
-// src/daemon/core/engine.js — Merlin Autonomous Turn Loop + Grounding Gate
+// src/daemon/core/engine.js — Liber Autonomous Turn Loop + Grounding Gate
 const registry = require('./registry');
 const circuitBreaker = require('./circuit-breaker');
 const logger = require('../../utils/logger');
-const { buildSystemPrompt } = require('./merlin-soul');
+const { buildSystemPrompt } = require('./liber-soul');
 const { EvidenceLedger } = require('./evidence');
 const grounding = require('./grounding');
 const skills = require('./skills');
@@ -24,7 +24,7 @@ const DEFAULT_GROUNDING = {
 const SUBAGENT_TOOLS = ['read_file', 'search_files', 'terminal', 'fetch_url', 'todo_list', 'memory'];
 const SUBAGENT_MAX_LOOPS = 6;
 
-class MerlinEngine {
+class LiberEngine {
   /**
    * Parse tool calls. Bracket/quote-aware so JSON strings containing ")" survive.
    */
@@ -450,7 +450,7 @@ class MerlinEngine {
         iteration: iteration + 1,
         max_iterations: maxLoops,
         receipts: ledger.entries.length,
-        active_node: `MerlinCore #${iteration + 1}`
+        active_node: `LiberCore #${iteration + 1}`
       });
 
       const llmStart = Date.now();
@@ -814,4 +814,4 @@ class MerlinEngine {
   }
 }
 
-module.exports = new MerlinEngine();
+module.exports = new LiberEngine();

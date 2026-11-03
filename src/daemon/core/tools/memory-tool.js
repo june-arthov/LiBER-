@@ -1,4 +1,4 @@
-// src/daemon/core/tools/memory-tool.js — Merlin Persistent Memory Bank
+// src/daemon/core/tools/memory-tool.js — Liber Persistent Memory Bank
 const fs = require('fs');
 const path = require('path');
 

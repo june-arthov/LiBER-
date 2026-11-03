@@ -1,4 +1,4 @@
-// src/daemon/core/registry.js — Merlin Tool Registry & Schema Engine
+// src/daemon/core/registry.js — Liber Tool Registry & Schema Engine
 const { readFile, writeFile, patchFile, searchFiles } = require('./tools/file-tools');
 const { runTerminal, isCommandSensitive } = require('./tools/terminal-tool');
 const { manageTodo } = require('./tools/todo-tool');

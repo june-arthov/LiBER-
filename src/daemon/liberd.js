@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const llmManager = require('./llm/manager');
 const ConfigLoader = require('../utils/config-loader');
-const merlinEngine = require('./core/engine');
+const liberEngine = require('./core/engine');
 const memory = require('./core/memory');
 const registry = require('./core/registry');
 const circuitBreaker = require('./core/circuit-breaker');
@@ -187,7 +187,7 @@ class LiberDaemon {
         if (!this.agents.has(id)) throw new Error(`Agent ${id} not found`);
 
         const agent = this.agents.get(id);
-        const result = await this.queue.run(id, () => merlinEngine.resume(id, {
+        const result = await this.queue.run(id, () => liberEngine.resume(id, {
           agentConfig: agent.config,
           memory,
           llmManager,
@@ -270,7 +270,7 @@ class LiberDaemon {
 
         const agent = this.agents.get(agentId);
         try {
-          const result = await this.queue.run(agentId, () => merlinEngine.runTurn({
+          const result = await this.queue.run(agentId, () => liberEngine.runTurn({
             agentId,
             agentConfig: agent.config,
             userMessage: message,
@@ -296,7 +296,7 @@ class LiberDaemon {
         if (!this.agents.has(agentId)) throw new Error(`Agent ${agentId} not found`);
         const agent = this.agents.get(agentId);
 
-        const result = await this.queue.run(agentId, () => merlinEngine.runTurn({
+        const result = await this.queue.run(agentId, () => liberEngine.runTurn({
           agentId,
           agentConfig: agent.config,
           userMessage: message,
