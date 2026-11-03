@@ -29,6 +29,33 @@ DAEMON_URL = "http://127.0.0.1:4567"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
+def load_local_facts() -> Dict[str, Any]:
+    """Read version + tuning facts from the repo itself — never hardcode them."""
+    import re
+    facts = {"version": "0.0.0", "window_size": None, "max_loops": None}
+    try:
+        pkg_text = (ROOT_DIR / "package.json").read_text(encoding="utf-8")
+        m = re.search(r'"version"\s*:\s*"([^"]+)"', pkg_text)
+        if m:
+            facts["version"] = m.group(1)
+    except OSError:
+        pass
+    try:
+        yaml_text = (ROOT_DIR / "liber.yaml").read_text(encoding="utf-8")
+        m = re.search(r"window_size\s*:\s*(\d+)", yaml_text)
+        if m:
+            facts["window_size"] = int(m.group(1))
+        m = re.search(r"max_loops\s*:\s*(\d+)", yaml_text)
+        if m:
+            facts["max_loops"] = int(m.group(1))
+    except OSError:
+        pass
+    return facts
+
+
+LOCAL_FACTS = load_local_facts()
+
+
 def auth_headers() -> Dict[str, str]:
     """Bearer token written by the daemon at boot (.liber/daemon.token)."""
     token = os.environ.get("LIBER_TOKEN", "")
@@ -104,11 +131,12 @@ class LiberCue:
 
 class HeaderBar(Static):
     """Header status bar dengan visual telemetry global."""
-    latency = reactive(24)
+    # Honest idle values: zeros until the daemon reports real numbers.
+    latency = reactive(0)
     tok_speed = reactive(0.0)
-    ctx_used = reactive(1800)
+    ctx_used = reactive(0)
     ctx_total = 32000
-    model_name = reactive("glm-5.3-flash:cloud")
+    model_name = reactive("—")
     state_label = reactive("IDLE")
 
     def render(self) -> Panel:
@@ -145,25 +173,28 @@ class HeaderBar(Static):
 
 
 class TelemetrySidebar(Static):
-    """Sidebar kanan berisi metrik performa, DAG topology, dan memory bank."""
+    """Sidebar kanan berisi metrik performa, daftar agen nyata, dan memory bank."""
     tok_velocity = reactive(" ▂▃▅▇█▇▆▅ — t/s")
     cost_accum = reactive(0.0)
-    active_node = reactive("Orchestrator")
+    agents = reactive([])
     gateway = reactive("LiberDaemon:4567")
 
     def render(self) -> Panel:
         content = Text()
 
-        # Topology DAG Tree
-        content.append("⎔ AGENT TOPOLOGY\n", "bold #8B5CF6")
-        content.append(" ├─ [✓] ", "#10B981")
-        content.append("Orchestrator (Root)\n", "white")
-        content.append(" ├─ [✓] ", "#10B981")
-        content.append("EnvScanner\n", "white")
-        content.append(" └─ [▶] ", "bold #00F0FF")
-        content.append(f"{self.active_node}\n", "bold #00F0FF")
-        content.append("    └─ [◌] ", "#52525B")
-        content.append("SafetyAuditor\n\n", "dim white")
+        # Real agent fleet, straight from the daemon — no invented topology.
+        content.append("⎔ AGENT FLEET\n", "bold #8B5CF6")
+        agents = self.agents or []
+        if not agents:
+            content.append(" └─ (no agents reported)\n\n", "dim white")
+        else:
+            for i, a in enumerate(agents):
+                branch = " └─" if i == len(agents) - 1 else " ├─"
+                running = a.get("status") == "RUNNING"
+                icon, color = ("●", "#10B981") if running else ("○", "#52525B")
+                content.append(f" {branch} [{icon}] ", color)
+                content.append(f"{a.get('id', '?')} ({a.get('status', '?')})\n", "white")
+            content.append("\n", "default")
 
         # Telemetry Data
         content.append("⎔ RUNTIME TELEMETRY\n", "bold #00F0FF")
@@ -172,18 +203,23 @@ class TelemetrySidebar(Static):
         content.append(" • Cost Acc : ", "dim white")
         content.append(f"${self.cost_accum:.4f}\n", "bold #F59E0B")
         content.append(" • Gateway  : ", "dim white")
-        content.append(f"{self.gateway}\n", "#38BDF8")
+        content.append(f"{DAEMON_URL.split('//')[-1]}\n", "#38BDF8")
         content.append(" • Isolation: ", "dim white")
-        content.append("Local Sandbox\n\n", "#10B981")
+        content.append("Pattern policy\n", "#F59E0B")
+        content.append("              ", "dim white")
+        content.append("(no OS sandbox)\n\n", "dim #52525B")
 
         # Memory Slots
         content.append("⎔ MEMORY POOL (Cognitive)\n", "bold #F59E0B")
         content.append(" • Working Memory  : ", "dim white")
-        content.append("sliding-window (10)\n", "white")
+        win = LOCAL_FACTS.get("window_size")
+        content.append(f"sliding-window ({win})" if win else "sliding-window\n", "white")
+        content.append("\n", "white")
         content.append(" • Active Context  : ", "dim white")
-        content.append("Cognitive Pulse [ON]\n", "white")
+        content.append("Evidence Ledger [ON]\n", "white")
         content.append(" • Circuit Breaker : ", "dim white")
-        content.append("5 loops max\n", "dim #52525B")
+        loops = LOCAL_FACTS.get("max_loops")
+        content.append(f"{loops} loops max\n" if loops else "—\n", "dim #52525B")
 
         return Panel(
             content,
@@ -313,7 +349,7 @@ class LiberApp(App):
         self.log_widget.write(
             Text.assemble(
                 LiberCue.badge("SYSTEM", "black on #00FF87"),
-                (" Liber Agentic Harness v0.2.0 active. Engine: ", "bold white"),
+                (f" Liber Agentic Harness v{LOCAL_FACTS['version']} active. Engine: ", "bold white"),
                 (f"{DAEMON_URL}\n", "#38BDF8"),
                 ("  Type commands in input bar below or press ", "dim white"),
                 ("[SPACE]", "bold white"),
@@ -334,8 +370,9 @@ class LiberApp(App):
                     agents = data.get("data", [])
                     if agents:
                         agent = agents[0]
-                        model = agent.get("model") or agent.get("config", {}).get("engine", {}).get("model", "glm-5.3-flash:cloud")
+                        model = agent.get("model") or agent.get("config", {}).get("engine", {}).get("model", "—")
                         self.header_widget.model_name = model
+                        self.sidebar_widget.agents = agents
                         self.log_widget.write(
                             Text.assemble(
                                 LiberCue.badge("DAEMON", "black on #00F0FF"),
@@ -558,8 +595,6 @@ class LiberApp(App):
                 self.header_widget.latency = int(data["latency"])
             if "cost_accum" in data:
                 self.sidebar_widget.cost_accum = float(data["cost_accum"])
-            if "active_node" in data:
-                self.sidebar_widget.active_node = data["active_node"]
 
         # 5b. Grounding gate events (zero-hallucination layer)
         elif event == "grounding_audit":
