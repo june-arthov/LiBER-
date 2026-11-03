@@ -28,7 +28,7 @@
       "borderless": false,
       "fullScreen": false,
       "alwaysOnTop": false,
-      "icon": "",
+      "icon": "/resources/icons/appIcon.png",
       "enableInspector": true,
       "exitProcessOnClose": true
     }
