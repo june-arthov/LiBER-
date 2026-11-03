@@ -3,6 +3,8 @@ const { readFile, writeFile, patchFile, searchFiles } = require('./tools/file-to
 const { runTerminal, isCommandSensitive } = require('./tools/terminal-tool');
 const { manageTodo } = require('./tools/todo-tool');
 const { manageMemory } = require('./tools/memory-tool');
+const { fetchUrl } = require('./tools/web-tool');
+const { validateArgs } = require('./validate');
 
 class ToolRegistry {
   constructor() {
@@ -126,6 +128,21 @@ class ToolRegistry {
       },
       handler: manageMemory
     });
+
+    // 8. fetch_url — ground external claims in retrieved text
+    this.register({
+      name: 'fetch_url',
+      description: 'Fetch an http(s) URL and return the readable text (HTML stripped). Use to verify external facts instead of guessing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Absolute http(s) URL to fetch' },
+          maxChars: { type: 'integer', description: 'Maximum characters of text to return (default 12000)' }
+        },
+        required: ['url']
+      },
+      handler: fetchUrl
+    });
   }
 
   register(def) {
@@ -146,11 +163,42 @@ class ToolRegistry {
     return !!tool.sensitive;
   }
 
+  /**
+   * Schema-lite validation. A tool must never execute on malformed or hallucinated arguments.
+   */
+  validate(name, args = {}) {
+    const tool = this.get(name);
+    if (!tool) {
+      return {
+        ok: false,
+        errors: [`Tool '${name}' is not registered. Available: ${Array.from(this.tools.keys()).join(', ')}.`],
+        problems: [{ field: 'tool', issue: 'unknown_tool' }],
+        schema: null
+      };
+    }
+    const result = validateArgs(tool.parameters, args);
+    return { ...result, schema: { required: tool.parameters?.required || [], properties: Object.keys(tool.parameters?.properties || {}) } };
+  }
+
   async execute(name, args = {}) {
     const tool = this.get(name);
     if (!tool) {
-      return { error: `Tool '${name}' is not registered.` };
+      return {
+        error: `Tool '${name}' is not registered. Available: ${Array.from(this.tools.keys()).join(', ')}.`,
+        validation_failed: true
+      };
     }
+
+    const validation = this.validate(name, args);
+    if (!validation.ok) {
+      return {
+        error: `Invalid arguments for '${name}': ${validation.errors.join(' ')}`,
+        validation_failed: true,
+        problems: validation.problems,
+        schema: validation.schema
+      };
+    }
+
     try {
       return await tool.handler(args);
     } catch (err) {

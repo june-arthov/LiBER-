@@ -166,6 +166,24 @@ function getSlashCommands() {
       lines.push(C.darkDim('  ╰─' + '─'.repeat(58) + '╯\n'));
       return lines.join('\n');
     },
+    doctrine: async () => {
+      const { loadAll, MODULES } = require(path.join(ROOT, 'src', 'daemon', 'core', 'spellbook'));
+      const modules = loadAll();
+      const lines = [];
+      lines.push('');
+      lines.push(C.darkDim('  ╭─ ') + C.purple(C.bold('MERLIN SPELLBOOK · DOCTRINE')) + C.darkDim(' ───────────────────────╮'));
+      lines.push('  ' + C.darkDim('│ ') + C.dim('Grounding gate: ') + C.green('ENABLED') + C.dim('  ·  audit + repair + read-back'));
+      lines.push('  ' + C.darkDim('├─' + '─'.repeat(58) + '┤'));
+      modules.forEach((m) => {
+        const def = MODULES.find(x => x.id === m.id) || {};
+        const tag = def.always ? C.green('ALWAYS') : C.amber('INTENT');
+        lines.push('  ' + C.darkDim('│ ') + C.sky(m.id.padEnd(14)) + tag + ' '.repeat(10) + C.dim(`${m.chars} chars`));
+      });
+      lines.push('  ' + C.darkDim('├─' + '─'.repeat(58) + '┤'));
+      lines.push('  ' + C.darkDim('│ ') + C.dim('Every claim audited against tool receipts · unresolved → GROUNDING AUDIT'));
+      lines.push(C.darkDim('  ╰─' + '─'.repeat(58) + '╯\n'));
+      return lines.join('\n');
+    },
     models: async () => {
       try {
         const res = await requestDaemon('/models');
@@ -346,6 +364,14 @@ program
   .action(async (opts) => {
     const logsOutput = await getSlashCommands().logs(opts.lines);
     console.log(logsOutput);
+  });
+
+// COMMAND: doctrine
+program
+  .command('doctrine')
+  .description('Show the Merlin spellbook modules enforced by the grounding gate')
+  .action(async () => {
+    console.log(await getSlashCommands().doctrine());
   });
 
 // COMMAND: tui

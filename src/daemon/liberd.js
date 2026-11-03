@@ -79,9 +79,10 @@ class LiberDaemon {
       const config = ConfigLoader.load(configPath);
       llmManager.initialize(config.agent.engine);
 
+      this.maxLoops = config.limits?.circuit_breaker?.max_loops || 12;
       const agentId = config.agent.name || 'default-agent';
       this.agents.set(agentId, {
-        config: config.agent,
+        config: { ...config.agent, grounding: config.grounding || {} },
         status: 'RUNNING',
         startTime: Date.now(),
         metrics: { tokens: 0, requests: 0 }
@@ -97,6 +98,24 @@ class LiberDaemon {
     }
   }
 
+  /**
+   * Public view of an agent. Never exposes credentials or raw config.
+   */
+  sanitizeAgent(id, data) {
+    const engine = data.config?.engine || {};
+    return {
+      id,
+      status: data.status,
+      startTime: data.startTime,
+      metrics: data.metrics,
+      name: data.config?.name || id,
+      version: data.config?.version || null,
+      model: engine.model || null,
+      provider: engine.provider || null,
+      grounding: data.config?.grounding?.enabled !== false
+    };
+  }
+
   async handleRequest(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const endpoint = url.pathname;
@@ -104,7 +123,7 @@ class LiberDaemon {
 
     try {
       if (endpoint === '/ps') {
-        const status = Array.from(this.agents.entries()).map(([id, data]) => ({ id, ...data }));
+        const status = Array.from(this.agents.entries()).map(([id, data]) => this.sanitizeAgent(id, data));
         res.end(JSON.stringify({ success: true, data: status }));
       } 
       else if (endpoint === '/shutdown') {
@@ -167,7 +186,8 @@ class LiberDaemon {
             memory,
             llmManager,
             onEvent: sendEvent,
-            waitForHitl: (aid, toolName, args) => this.waitForHitl(aid, `${toolName}: ${JSON.stringify(args)}`)
+            waitForHitl: (aid, toolName, args) => this.waitForHitl(aid, `${toolName}: ${JSON.stringify(args)}`),
+            maxLoops: this.maxLoops
           });
         } catch (err) {
           sendEvent('error', { error: err.message });
@@ -188,7 +208,8 @@ class LiberDaemon {
           userMessage: message,
           memory,
           llmManager,
-          waitForHitl: () => Promise.resolve(true)
+          waitForHitl: () => Promise.resolve(true),
+          maxLoops: this.maxLoops
         });
 
         res.end(JSON.stringify(result));

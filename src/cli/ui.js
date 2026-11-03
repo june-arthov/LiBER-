@@ -233,11 +233,23 @@ function printAgentResponse(agent, responseData) {
   console.log();
 
   // Metrics footer
+  const grounding = (!isString && responseData.grounding) || null;
   const stats = [];
   if (durationMs) stats.push(`took ${(durationMs / 1000).toFixed(1)}s`);
   if (iterations) stats.push(`${iterations} iteration${iterations > 1 ? 's' : ''}`);
+  let statsColor = C.darkDim;
+  if (grounding) {
+    if (grounding.status === 'PASS') {
+      const receipts = (grounding.ledger && grounding.ledger.receipts) || [];
+      stats.push(`grounded · ${receipts.length} receipt${receipts.length === 1 ? '' : 's'}`);
+      statsColor = C.green;
+    } else if (grounding.status === 'REPAIR') {
+      stats.push(`⚠ ${grounding.violations.length} unverified claim${grounding.violations.length === 1 ? '' : 's'}`);
+      statsColor = C.amber;
+    }
+  }
   if (stats.length) {
-    console.log('  ' + C.darkDim(`[${stats.join(' · ')}]`));
+    console.log('  ' + statsColor(`[${stats.join(' · ')}]`));
     console.log();
   }
 }

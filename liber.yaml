@@ -11,14 +11,22 @@ agent:
     model: "kimi-k2.7-code" # Active cloud model
     endpoint: "https://ollama.com/v1" # Ollama Cloud endpoint
     apiKey: "${OLLAMA_CLOUD_API_KEY}" # Loaded automatically from .env or environment
-    temperature: 0.7
+    temperature: 0.2
     max_tokens: 2048
 
 limits:
   max_cost_per_day: 1.0
   circuit_breaker:
-    max_loops: 5
+    max_loops: 12
     timeout: 30s
+
+# Zero-hallucination enforcement (see src/daemon/core/grounding.js)
+grounding:
+  enabled: true
+  max_repairs: 2          # audit-repair rounds before an answer ships with a GROUNDING AUDIT warning
+  require_readback: true  # write_file/patch must be followed by read_file before success is claimed
+  require_citations: true # every audited claim must cite an [E#] receipt
+  doctrine_budget_chars: 7000
 
 memory:
   strategy: "sliding-window"

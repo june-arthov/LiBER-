@@ -34,6 +34,7 @@ LiBER agents are equipped with Merlin's core toolsets:
 | `patch` | Surgical code replacement with whitespace-tolerant fuzzy matching & diff preview |
 | `search_files` | Recursive regex content search and file globbing |
 | `terminal` | PowerShell / Bash host shell execution with timeout and output capture |
+| `fetch_url` | HTTP(S) fetch with HTML→text extraction — ground external claims instead of guessing |
 | `todo_list` | Structured multi-step task planning and dependency tracking |
 | `memory` | Persistent cross-session knowledge bank (`.liber_memory.json`) |
 
@@ -101,6 +102,35 @@ liber stop        # Gracefully shutdown daemon
 ```
 
 ---
+
+## 🧿 Zero-Hallucination Protocol
+
+Prompt wording alone cannot stop a model from inventing claims, so LiBER enforces grounding
+mechanically on every turn:
+
+1. **Evidence ledger** — every tool result becomes a numbered receipt (`E1`, `E2`, …) with tool,
+   arguments, exit code, output hash and excerpt. The ledger is injected into the system prompt.
+2. **Grounding gate** — before any answer is returned, `src/daemon/core/grounding.js` audits every
+   auditable sentence (file paths, commands, test results, versions, dates, "I did X" claims).
+   Each must cite a receipt that exists in this turn's ledger.
+3. **Repair loop** — a failing answer is blocked and sent back with its exact violations. The model
+   must gather the missing receipts or write the claim as `UNVERIFIED: …`. After `max_repairs`
+   (default 2) the answer ships with a visible `GROUNDING AUDIT` footer naming every unproven claim.
+4. **Read-back enforcement** — `write_file` / `patch` put the file into a pending-verification set;
+   success cannot be claimed until the file is read back or a test/build runs green.
+5. **Argument validation** — tool calls are validated against their schema before execution;
+   missing, typo'd or ill-typed arguments are rejected and fed back, never executed.
+6. **Doctrine** — the distilled Merlin method (`src/daemon/spellbook/*.md`) is injected by intent:
+   iron law, grounding, systematic debugging, verification-first, surgical precision, honest
+   refusal, instruction fidelity. Inspect it with `liber doctrine`.
+
+**What it guarantees:** no unverified claim is delivered as verified fact — every auditable claim
+is bound to a real receipt or explicitly labelled UNVERIFIED. It does not make the model
+omniscient: receipt binding is syntactic (the claim cited *a* real receipt), so the doctrine still
+obliges the model to cite the receipt that actually proves the claim.
+
+Run the enforcement suite with `npm test` (45 tests, including a scripted model that hallucinates,
+gets blocked, and is forced to read the file before answering).
 
 ## 🛡️ Human-In-The-Loop (HITL) Safety
 

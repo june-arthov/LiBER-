@@ -93,7 +93,7 @@ class LiberCue:
 class HeaderBar(Static):
     """Header status bar dengan visual telemetry global."""
     latency = reactive(24)
-    tok_speed = reactive(68.4)
+    tok_speed = reactive(0.0)
     ctx_used = reactive(1800)
     ctx_total = 32000
     model_name = reactive("glm-5.3-flash:cloud")
@@ -134,8 +134,8 @@ class HeaderBar(Static):
 
 class TelemetrySidebar(Static):
     """Sidebar kanan berisi metrik performa, DAG topology, dan memory bank."""
-    tok_velocity = reactive(" ▂▃▅▇█▇▆▅ 72.1 t/s")
-    cost_accum = reactive(0.0018)
+    tok_velocity = reactive(" ▂▃▅▇█▇▆▅ — t/s")
+    cost_accum = reactive(0.0)
     active_node = reactive("Orchestrator")
     gateway = reactive("LiberDaemon:4567")
 
@@ -507,17 +507,56 @@ class LiberApp(App):
             if "active_node" in data:
                 self.sidebar_widget.active_node = data["active_node"]
 
+        # 5b. Grounding gate events (zero-hallucination layer)
+        elif event == "grounding_audit":
+            codes = ", ".join(sorted({v.get("code", "?") for v in data.get("violations", [])}))
+            self.log_widget.write(
+                Text.assemble(
+                    LiberCue.badge("GROUNDING", "black on #F59E0B"),
+                    (f" repair {data.get('attempt', 1)}/{data.get('max_repairs', 2)} — blocked unverified claims: {codes}", "bold #F59E0B")
+                )
+            )
+
+        elif event == "grounding_warning":
+            n = len(data.get("violations", []))
+            self.log_widget.write(
+                Text.assemble(
+                    LiberCue.badge("UNVERIFIED", "white on #EF4444"),
+                    (f" {n} claim(s) shipped without receipts — see GROUNDING AUDIT footer", "bold #EF4444")
+                )
+            )
+
+        elif event == "grounding_pass":
+            self.log_widget.write(
+                Text.assemble(
+                    LiberCue.badge("GROUNDED", "black on #10B981"),
+                    (f" {data.get('claims_checked', 0)} claim(s) bound to {data.get('receipts', 0)} receipt(s)", "dim #10B981")
+                )
+            )
+
         # 6. Final Agent Response
         elif event == "final":
             final_text = data.get("response", "")
             duration = data.get("durationMs", 0)
             iterations = data.get("iterations", 1)
+            grounding = data.get("grounding") or {}
+            status = grounding.get("status", "DISABLED")
+
+            if status == "PASS":
+                cycle = f"↳ [CYCLE COMPLETE: {duration}ms │ {iterations} turns │ GROUNDED · {len(grounding.get('ledger', {}).get('receipts', []))} receipts]"
+                cycle_style = "dim #10B981"
+            elif status == "REPAIR":
+                cycle = f"↳ [CYCLE COMPLETE: {duration}ms │ {iterations} turns │ ⚠ {len(grounding.get('violations', []))} UNVERIFIED CLAIM(S)]"
+                cycle_style = "bold #F59E0B"
+            else:
+                cycle = f"↳ [CYCLE COMPLETE: {duration}ms │ {iterations} turns]"
+                cycle_style = "dim #10B981"
 
             self.log_widget.write(
                 Text.assemble(
                     LiberCue.badge("RESPONSE", "black on #00FF87"),
                     (f" {final_text}\n", "bright_white"),
-                    (f"↳ [CYCLE COMPLETE: {duration}ms │ {iterations} turns]", "dim #10B981")
+                    (cycle, cycle_style)
                 )
             )
 

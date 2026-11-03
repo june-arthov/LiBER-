@@ -1,8 +1,15 @@
 // src/daemon/core/circuit-breaker.js
 class CircuitBreaker {
   constructor(maxIterations = 5) {
-    this.maxIterations = maxIterations;
+    this.defaultLimit = maxIterations;
+    this.limits = new Map();   // agentId -> max iterations
     this.counters = new Map(); // agentId -> count
+  }
+
+  configureLimit(agentId, maxIterations) {
+    if (Number.isFinite(maxIterations) && maxIterations > 0) {
+      this.limits.set(agentId, maxIterations);
+    }
   }
 
   increment(agentId) {
@@ -16,7 +23,8 @@ class CircuitBreaker {
   }
 
   isBroken(agentId) {
-    return (this.counters.get(agentId) || 0) >= this.maxIterations;
+    const limit = this.limits.get(agentId) || this.defaultLimit;
+    return (this.counters.get(agentId) || 0) >= limit;
   }
 }
 

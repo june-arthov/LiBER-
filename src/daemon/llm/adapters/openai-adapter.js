@@ -12,7 +12,8 @@ class OpenAIAdapter extends LLMAdapter {
       body: JSON.stringify({
         model: this.config.model,
         messages: messages,
-        temperature: options.temperature || 0.7,
+        temperature: options.temperature ?? this.config.temperature ?? 0.7,
+        max_tokens: options.max_tokens || this.config.max_tokens || undefined,
         stream: false
       })
     });
@@ -33,10 +34,16 @@ class OpenAIAdapter extends LLMAdapter {
       body: JSON.stringify({
         model: this.config.model,
         messages: messages,
-        temperature: options.temperature || 0.7,
+        temperature: options.temperature ?? this.config.temperature ?? 0.7,
+        max_tokens: options.max_tokens || this.config.max_tokens || undefined,
         stream: true
       })
     });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${errText.slice(0, 300) || response.statusText}`);
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
