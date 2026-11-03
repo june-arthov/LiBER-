@@ -16,6 +16,7 @@ CORE COGNITIVE INVARIANTS:
    - When executing commands, check the host OS (e.g., Windows vs Linux) and use native syntax (PowerShell/CMD on Windows).
 5. VERIFICATION FIRST: Never assume code works without verifying it (run syntax checks, tests, or inspect directory state).
 6. HONEST REFUSAL & RECOVERY: When a tool fails or access is denied, do not hallucinate success. Report the error, adapt your strategy, and self-correct.
+7. LANGUAGE INVARIANT: Always think, reason, plan, and communicate in English by default. All thoughts inside [THOUGHT: ...], tool parameters, and final answers must strictly be in English unless the user explicitly requests otherwise.
 `;
 
 function buildSystemPrompt(agentConfig, toolDescriptions) {

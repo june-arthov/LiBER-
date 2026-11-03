@@ -182,7 +182,7 @@ class TelemetrySidebar(Static):
 
 
 class HitlGate(Static):
-    """Dock bawah untuk intervensi Human-In-The-Loop."""
+    """Dock panel for Human-In-The-Loop interventions."""
     hitl_active = reactive(False)
     action_target = reactive("system_call")
 
@@ -191,16 +191,16 @@ class HitlGate(Static):
             msg = Text.assemble(
                 ("● MODE: ", "#52525B"),
                 ("AUTONOMOUS EXECUTION", "bold #10B981"),
-                (" │ Tekan ", "dim white"),
+                (" │ Press ", "dim white"),
                 ("[SPACE]", "bold white"),
-                (" untuk force-pause loop. Ketik prompt di input bawah.", "dim white")
+                (" to pause execution loop. Type instructions below.", "dim white")
             )
             return Panel(msg, border_style="#27272A", style="on #08090A")
 
         msg = Text.assemble(
             ("⚠️  HITL INTERCEPT ACTIVE: ", "bold black on #F59E0B"),
-            (f" Sub-Agent meminta izin mengeksekusi: `{self.action_target}`\n", "bold white"),
-            ("❯ Pilih Aksi: ", "bold #F59E0B"),
+            (f" Agent requested operator authorization for: `{self.action_target}`\n", "bold white"),
+            ("❯ Choose Action: ", "bold #F59E0B"),
             ("[A]", "bold #10B981"), (" Approve  ", "white"),
             ("[D]", "bold #EF4444"), (" Deny & Abort  ", "white"),
             ("[SPACE]", "bold #00F0FF"), (" Toggle Pause", "white")
@@ -282,11 +282,11 @@ class LiberApp(App):
             with Vertical(id="sidebar-pane"):
                 yield TelemetrySidebar(id="telemetry-sidebar")
         yield HitlGate(id="hitl-gate")
-        yield Input(placeholder="Ketik instruksi untuk agent (Enter untuk kirim)...", id="prompt-input")
+        yield Input(placeholder="Type instructions for agent (Press Enter to send)...", id="prompt-input")
         yield Footer()
 
     async def on_mount(self) -> None:
-        """Inisialisasi koneksi daemon dan mount handler."""
+        """Initialize daemon connection and mount widgets."""
         self.log_widget = self.query_one("#agent-log", RichLog)
         self.hitl_widget = self.query_one("#hitl-gate", HitlGate)
         self.sidebar_widget = self.query_one("#telemetry-sidebar", TelemetrySidebar)
@@ -297,23 +297,23 @@ class LiberApp(App):
         self.hitl_verdict: bool = False
         self.agent_busy: bool = False
 
-        # Sambut operator di stream log
+        # Welcome operator in stream log
         self.log_widget.write(
             Text.assemble(
                 LiberCue.badge("SYSTEM", "black on #00FF87"),
-                (" Liber Agentic Harness v0.2.0 aktif. Engine: ", "bold white"),
+                (" Liber Agentic Harness v0.2.0 active. Engine: ", "bold white"),
                 (f"{DAEMON_URL}\n", "#38BDF8"),
-                ("  Ketik perintah di input bar bawah atau tekan ", "dim white"),
+                ("  Type commands in input bar below or press ", "dim white"),
                 ("[SPACE]", "bold white"),
-                (" untuk toggle pause.\n", "dim white")
+                (" to toggle pause.\n", "dim white")
             )
         )
 
-        # Cek ketersediaan daemon secara asynchronous
+        # Check daemon availability
         asyncio.create_task(self.check_and_ensure_daemon())
 
     async def check_and_ensure_daemon(self) -> None:
-        """Memastikan daemon aktif atau memberikan status online."""
+        """Verify daemon status and fetch active agent profile."""
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 res = await client.get(f"{DAEMON_URL}/ps")
@@ -327,17 +327,20 @@ class LiberApp(App):
                         self.log_widget.write(
                             Text.assemble(
                                 LiberCue.badge("DAEMON", "black on #00F0FF"),
-                                (f" Terhubung ke agent: `{agent.get('id', 'dev-bot')}` [ONLINE]\n", "#10B981")
+                                (f" Connected to agent: `{agent.get('id', 'dev-bot')}` [ONLINE]\n", "#10B981")
                             )
                         )
                         return
         except Exception:
             pass
 
-        # Jika daemon offline, beri petunjuk
+        # Offline guidance
         self.log_widget.write(
             Text.assemble(
                 LiberCue.badge("OFFLINE", "black on #F59E0B"),
+                (" Daemon is offline on port 4567. Run 'liber spawn' in terminal or wait for auto-spawn...", "dim #F59E0B")
+            )
+        )
                 (" Daemon belum aktif pada port 4567. Jalankan `liber spawn` di terminal lain atau tunggu auto-spawn...", "dim #F59E0B")
             )
         )
@@ -409,7 +412,7 @@ class LiberApp(App):
             self.log_widget.write(
                 Text.assemble(
                     LiberCue.badge("ERROR", "white on #EF4444"),
-                    (" Tidak dapat menghubungi Liber daemon (127.0.0.1:4567). Pastikan daemon berjalan.", "#EF4444")
+                    (" Unable to connect to Liber daemon (127.0.0.1:4567). Ensure daemon is running.", "#EF4444")
                 )
             )
         except Exception as e:
@@ -426,13 +429,13 @@ class LiberApp(App):
 
     async def handle_backend_event(self, event: str, data: Dict[str, Any]) -> None:
         """
-        Event Parser sesuai arsitektur harness:
+        Event Parser for agent harness:
         - thought -> LiberCue.badge("THOUGHT", ...)
         - tool_dispatch -> LiberCue.tool_dispatch_box(tool_name, cmd)
         - hitl_intercept -> Trigger breakpoint HITL
         - observation -> LiberCue.badge("OBSERVE", ...)
-        - telemetry -> Reactive updates pada header dan sidebar
-        - final -> Output jawaban final
+        - telemetry -> Reactive updates on header and sidebar
+        - final -> Output final answer
         """
         # 1. Thought / Reasoning
         if event == "thought":
@@ -460,15 +463,15 @@ class LiberApp(App):
             self.log_widget.write(
                 Text.assemble(
                     LiberCue.badge("CRIT/WARN", "black on #F59E0B"),
-                    (f" [BREAKPOINT ACTIVATED] Policy memerlukan otorisasi operator manual untuk: `{target}`", "bold #F59E0B")
+                    (f" [BREAKPOINT ACTIVATED] Policy requires manual operator authorization for: `{target}`", "bold #F59E0B")
                 )
             )
 
-            # Buat signal barrier
+            # Signal barrier
             self.hitl_signal = asyncio.Event()
             await self.hitl_signal.wait()
 
-            # Kirim sinyal verdict kembali ke backend
+            # Send verdict back to daemon backend
             verdict_str = "approve" if self.hitl_verdict else "deny"
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
@@ -536,21 +539,21 @@ class LiberApp(App):
     # -----------------------------------------------------------------
 
     def action_toggle_pause(self) -> None:
-        """Menjeda loop eksekusi secara paksa."""
+        """Pause or resume the execution loop."""
         self.hitl_widget.hitl_active = not self.hitl_widget.hitl_active
         if self.hitl_widget.hitl_active:
             self.query_one("#stream-pane").styles.border = ("round", "#F59E0B")
             self.log_widget.write(
-                Text.assemble(LiberCue.badge("PAUSED", "black on #F59E0B"), (" Eksekusi dihentikan oleh operator.", "white"))
+                Text.assemble(LiberCue.badge("PAUSED", "black on #F59E0B"), (" Execution halted by operator.", "white"))
             )
         else:
             self.query_one("#stream-pane").styles.border = ("round", "#27272A")
             self.log_widget.write(
-                Text.assemble(LiberCue.badge("RESUMED", "black on #10B981"), (" Melanjutkan siklus agent loop...", "white"))
+                Text.assemble(LiberCue.badge("RESUMED", "black on #10B981"), (" Resuming agent loop cycle...", "white"))
             )
 
     def action_approve_action(self) -> None:
-        """Operator menyetujui mutasi file / aksi sensitif."""
+        """Approve sensitive tool/command execution."""
         if self.hitl_widget.hitl_active:
             self.hitl_widget.hitl_active = False
             self.hitl_verdict = True
@@ -558,14 +561,14 @@ class LiberApp(App):
             self.log_widget.write(
                 Text.assemble(
                     LiberCue.badge("APPROVED", "black on #10B981"),
-                    (f" Otorisasi diterima untuk `{self.hitl_widget.action_target}`. Menjalankan...", "white")
+                    (f" Authorization granted for `{self.hitl_widget.action_target}`. Executing...", "white")
                 )
             )
             if self.hitl_signal:
                 self.hitl_signal.set()
 
     def action_deny_action(self) -> None:
-        """Operator menolak aksi; paksa agent memikirkan rencana alternatif."""
+        """Deny sensitive action and require agent to re-plan."""
         if self.hitl_widget.hitl_active:
             self.hitl_widget.hitl_active = False
             self.hitl_verdict = False
@@ -573,14 +576,14 @@ class LiberApp(App):
             self.log_widget.write(
                 Text.assemble(
                     LiberCue.badge("REJECTED", "white on #EF4444"),
-                    (f" Aksi `{self.hitl_widget.action_target}` ditolak operator. Mengirim feedback ke agent.", "bold #EF4444")
+                    (f" Action `{self.hitl_widget.action_target}` denied by operator. Sending feedback to agent.", "bold #EF4444")
                 )
             )
             if self.hitl_signal:
                 self.hitl_signal.set()
 
     def action_clear_logs(self) -> None:
-        """Membersihkan layar log stream."""
+        """Clear log pane."""
         self.log_widget.clear()
 
 

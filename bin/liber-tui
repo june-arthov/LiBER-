@@ -63,7 +63,7 @@ blessed.box({ parent: inputBox, top: 0, left: 0, width: 5, height: 1, tags: true
 const input = blessed.textbox({
   parent: inputBox, top: 0, left: 6, right: 1, height: 1, inputOnFocus: true, style: { fg: 'white' },
 });
-const footerKeys = [['Enter', 'kirim', 'green'], ['PgUp/PgDn', 'scroll', 'cyan'], ['Ctrl+L', 'bersih', 'yellow'], ['Ctrl+C', 'keluar', 'red']];
+const footerKeys = [['Enter', 'send', 'green'], ['PgUp/PgDn', 'scroll', 'cyan'], ['Ctrl+L', 'clear', 'yellow'], ['Ctrl+C', 'quit', 'red']];
 const footer = blessed.box({
   bottom: 0, left: 0, width: '100%', height: 1, tags: true,
   content: footerKeys.map(([k, d, c]) => `${badge(c, k)}${fg(P.dim, ' ' + d + '  ')}`).join(''),
@@ -80,7 +80,7 @@ function request(route, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
     const req = http.request({ hostname: '127.0.0.1', port: PORT, path: route, method, headers: { 'Content-Type': 'application/json' }, timeout: 120000 }, (res) => {
       let d = ''; res.on('data', (c) => (d += c));
-      res.on('end', () => { try { resolve(JSON.parse(d)); } catch { reject(new Error('Respon tidak valid')); } });
+      res.on('end', () => { try { resolve(JSON.parse(d)); } catch { reject(new Error('Invalid response')); } });
     });
     req.on('timeout', () => req.destroy(new Error('Timeout')));
     req.on('error', reject);
@@ -125,7 +125,7 @@ function welcome() {
   logo.forEach((l, i) => chat.add('  {bold}' + fg(cols[i], l) + '{/bold}'));
   chat.add('');
   chat.add('  ' + fg(P.dim, 'Minimalist-Utilitarian AI Agent Orchestrator'));
-  chat.add('  ' + badge(P.green, 'Enter') + fg(P.dim, ' kirim pesan   ') + badge(P.cyan, 'PgUp') + fg(P.dim, ' scroll'));
+  chat.add('  ' + badge(P.green, 'Enter') + fg(P.dim, ' send message   ') + badge(P.cyan, 'PgUp') + fg(P.dim, ' scroll'));
   chat.add('');
 }
 
@@ -142,7 +142,7 @@ const bar = (frac, w, color) => {
 
 function renderSide(agent) {
   if (!agent) {
-    agentCard.setContent(`\n${fg(P.red, '✖ Daemon tidak terjangkau')}\n\n${fg(P.dim, 'Jalankan:')}\n  ${badge(P.yellow, 'liber spawn')}`);
+    agentCard.setContent(`\n${fg(P.red, '✖ Daemon unreachable')}\n\n${fg(P.dim, 'Run:')}\n  ${badge(P.yellow, 'liber spawn')}`);
   } else {
     const up = Math.floor((Date.now() - agent.startTime) / 1000);
     const row = (k, v) => `${fg(P.dim, k.padEnd(9))}${v}`;
@@ -155,7 +155,7 @@ function renderSide(agent) {
     ].join('\n'));
   }
   const L = state.latencies.slice(-24);
-  if (!L.length) metrics.setContent(`\n${fg(P.dim, 'belum ada data')}`);
+  if (!L.length) metrics.setContent(`\n${fg(P.dim, 'no data yet')}`);
   else {
     const max = Math.max(...L), avg = L.reduce((a, b) => a + b, 0) / L.length, last = L[L.length - 1];
     const spark = L.map((v) => SPARK[Math.min(7, Math.floor((v / (max || 1)) * 7))]).join('');
@@ -169,8 +169,8 @@ function renderSide(agent) {
 
 function renderInputLabel() {
   inputBox.setLabel(state.busy
-    ? badge(P.yellow, `${FRAMES[state.frame % FRAMES.length]} berpikir…`)
-    : badge(P.blue, `pesan untuk ${state.agent || 'agent'}`));
+    ? badge(P.yellow, `${FRAMES[state.frame % FRAMES.length]} thinking…`)
+    : badge(P.blue, `message for ${state.agent || 'agent'}`));
 }
 
 async function poll() {
@@ -215,7 +215,7 @@ input.on('submit', async (value) => {
   state.busy = true;
   const t0 = Date.now();
   try {
-    if (!state.agent) throw new Error('Daemon belum berjalan (liber spawn)');
+    if (!state.agent) throw new Error('Daemon not running (liber spawn)');
     const res = await request('/chat', 'POST', { agentId: state.agent, message: text });
     if (!res.success) throw new Error(res.error);
     state.latencies.push(Date.now() - t0); state.sent++;

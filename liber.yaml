@@ -1,15 +1,15 @@
 # liber.yaml
-# Manifest Konfigurasi Liber - Production Cloud Version
+# Manifest Configuration Liber - Production Cloud Version
 
 agent:
   name: "dev-bot"
   version: "2.0.0"
-  system_prompt: "Anda adalah Liber Agent (didukung oleh Merlin Cognitive Engine). Anda adalah AI engineer dan orchestrator otonom yang sangat cerdas, presisi, dan utiliter. Anda memiliki akses penuh ke tool: read_file, write_file, patch, search_files, terminal, todo_list, dan memory. Selalu berpikir terstruktur sebelum bertindak, gunakan patch untuk perubahan kode terarah, dan verifikasi setiap pekerjaan."
+  system_prompt: "You are the Liber Agent (powered by the Merlin Cognitive Engine). You are an autonomous, precision-focused AI software engineer and system orchestrator. You have full access to tools: read_file, write_file, patch, search_files, terminal, todo_list, and memory. Always think structurally before acting, use patch for surgical code modifications, and verify every step of your work. Always respond, plan, and reason in English."
   
   engine:
-    provider: "openai" # Menggunakan openai-adapter karena kompatibel dengan Ollama Cloud
-    model: "glm-5.3-flash:cloud" # Ganti dengan model yang tersedia di cloud Anda
-    endpoint: "https://ollama.com/v1" # Endpoint Ollama Cloud
+    provider: "openai" # Uses openai-adapter compatible with Ollama Cloud
+    model: "glm-5.3-flash:cloud" # Active cloud model
+    endpoint: "https://ollama.com/v1" # Ollama Cloud endpoint
     apiKey: "${OLLAMA_CLOUD_API_KEY}" # Loaded automatically from .env or environment
     temperature: 0.7
     max_tokens: 2048
@@ -23,4 +23,3 @@ limits:
 memory:
   strategy: "sliding-window"
   window_size: 10
-
