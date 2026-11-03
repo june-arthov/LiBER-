@@ -22,8 +22,10 @@ from rich.table import Table
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import Footer, RichLog, Static, Input
+from textual.widgets import Footer, RichLog, Static, Input, OptionList
 from textual.binding import Binding
+from textual.screen import ModalScreen
+from textual import work
 
 DAEMON_URL = "http://127.0.0.1:4567"
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -260,6 +262,32 @@ class HitlGate(Static):
 # 3. ROOT TUI APPLICATION
 # =====================================================================
 
+# (label, model, provider, endpoint) — daemon validates and persists the choice.
+MODEL_CATALOG = [
+    ("Ollama Cloud · glm-5.3-flash", "glm-5.3-flash", "openai", "https://ollama.com/v1"),
+    ("Ollama Cloud · kimi-k2.7-code", "kimi-k2.7-code", "openai", "https://ollama.com/v1"),
+    ("OpenAI · gpt-4.1-mini", "gpt-4.1-mini", "openai", "https://api.openai.com/v1"),
+    ("Groq · llama-3.3-70b-versatile", "llama-3.3-70b-versatile", "openai", "https://api.groq.com/openai/v1"),
+    ("Mistral · mistral-large-latest", "mistral-large-latest", "openai", "https://api.mistral.ai/v1"),
+    ("DeepSeek · deepseek-chat", "deepseek-chat", "openai", "https://api.deepseek.com/v1"),
+    ("Anthropic · claude-sonnet-4-5", "claude-sonnet-4-5", "anthropic", "https://api.anthropic.com"),
+    ("Google · gemini-2.5-pro", "gemini-2.5-pro", "gemini", "https://generativelanguage.googleapis.com"),
+    ("Ollama local · llama3.2", "llama3.2", "ollama", "http://localhost:11434"),
+]
+
+
+class ModelSelectScreen(ModalScreen):
+    """Picker modal: memilih model dari katalog dan meneruskan ke daemon."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static("Select AI model — the provider key must exist in .env", classes="model-hint")
+            yield OptionList(*[label for label, *_ in MODEL_CATALOG], id="model-options")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.id))
+
+
 class LiberApp(App):
     """Aplikasi TUI Utama Harness Liber."""
 
@@ -312,10 +340,35 @@ class LiberApp(App):
         scrollbar-gutter: stable;
         padding: 0 1;
     }
+
+    ModelSelectScreen {
+        align: center middle;
+        background: rgba(8, 9, 10, 0.85);
+    }
+
+    ModelSelectScreen Vertical {
+        width: 52;
+        height: auto;
+        max-height: 26;
+        border: round #8B5CF6;
+        background: #0D1117;
+        padding: 0 1;
+    }
+
+    #model-options {
+        height: auto;
+        max-height: 18;
+    }
+
+    .model-hint {
+        color: #94A3B8;
+        padding: 1 1 0 1;
+    }
     """
 
     BINDINGS = [
         Binding("space", "toggle_pause", "Pause/Resume"),
+        Binding("m", "switch_model", "Model"),
         Binding("a", "approve_action", "Approve HITL"),
         Binding("d", "deny_action", "Deny HITL"),
         Binding("c", "clear_logs", "Clear Logs"),
@@ -662,6 +715,60 @@ class LiberApp(App):
     # -----------------------------------------------------------------
     # Key Action Handlers (Operator Interventions)
     # -----------------------------------------------------------------
+
+    def action_switch_model(self) -> None:
+        """Buka modal pemilihan model AI."""
+        self.push_screen(ModelSelectScreen(), self.on_model_selected)
+
+    def on_model_selected(self, label: Optional[str]) -> None:
+        if not label:
+            return
+        preset = next((p for p in MODEL_CATALOG if p[0] == label), None)
+        if not preset:
+            return
+        _, model, provider, endpoint = preset
+        self.run_worker(self.apply_model_switch(model, provider, endpoint))
+
+    @work
+    async def apply_model_switch(self, model: str, provider: str, endpoint: str) -> None:
+        """POST /model/switch dan perbarui header dari respons daemon."""
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.post(
+                    f"{DAEMON_URL}/model/switch",
+                    json={"model": model, "provider": provider, "endpoint": endpoint},
+                    headers=auth_headers(),
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    if data.get("success"):
+                        active = data.get("active") or {}
+                        self.header_widget.model_name = active.get("model", model)
+                        self.sidebar_widget.gateway = active.get("endpoint", "").replace("https://", "").replace("http://", "") or self.sidebar_widget.gateway
+                        self.log_widget.write(
+                            Text.assemble(
+                                LiberCue.badge("MODEL", "black on #8B5CF6"),
+                                (f" switched to {active.get('model', model)} via {active.get('provider', provider)}", "#10B981"),
+                            )
+                        )
+                        return
+                try:
+                    detail = res.json().get("error", "")
+                except Exception:
+                    detail = f"HTTP {res.status_code}"
+                self.log_widget.write(
+                    Text.assemble(
+                        LiberCue.badge("MODEL", "white on #EF4444"),
+                        (f" switch failed: {detail}", "red"),
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            self.log_widget.write(
+                Text.assemble(
+                    LiberCue.badge("MODEL", "white on #EF4444"),
+                    (f" switch failed: {exc}", "red"),
+                )
+            )
 
     def action_toggle_pause(self) -> None:
         """Pause or resume the execution loop."""

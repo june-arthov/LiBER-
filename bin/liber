@@ -345,7 +345,8 @@ function getSlashCommands() {
       try {
         const res = await requestDaemon('/model/switch', 'POST', { model: targetModel });
         if (!res.success) throw new Error(res.error || 'Switch failed');
-        return `\n${C.green('✔ Successfully switched model to:')} ${C.bold(C.sky(res.active))}\n${C.dim('  Configuration saved to liber.yaml and reloaded dynamically.')}\n`;
+        const active = res.active?.model || targetModel;
+        return `\n${C.green('✔ Successfully switched model to:')} ${C.bold(C.sky(active))}${res.active?.provider ? ` (${res.active.provider})` : ''}\n${C.dim('  Configuration saved to liber.yaml and reloaded dynamically.')}\n`;
       } catch (err) {
         return `\n${C.red('✖ Model switch error:')} ${err.message}\n`;
       }
@@ -471,14 +472,24 @@ program
 program
   .command('models [modelName]')
   .alias('model')
+  .option('--provider <p>', 'Provider: openai | ollama | anthropic | gemini')
+  .option('--endpoint <e>', 'API endpoint URL')
   .description('List available AI models from the API endpoint or switch active model')
-  .action(async (modelName) => {
+  .action(async (modelName, opts) => {
     try {
       await ensureDaemon();
       if (modelName) {
-        const res = await requestDaemon('/model/switch', 'POST', { model: modelName });
+        const res = await requestDaemon('/model/switch', 'POST', {
+          model: modelName,
+          provider: opts.provider,
+          endpoint: opts.endpoint
+        });
         if (!res.success) throw new Error(res.error || 'Failed to switch model');
-        console.log(`\n${C.green('✔')} Switched active model to: ${C.bold(C.sky(res.active))}`);
+        const active = res.active?.model || modelName;
+        console.log(`\n${C.green('✔')} Switched active model to: ${C.bold(C.sky(active))}${res.active?.provider ? ` (${res.active.provider})` : ''}`);
+        if (res.changed && Object.values(res.changed).some(a => a.key_resolved === false)) {
+          console.log(C.amber('  ⚠ No API key found for this provider — add it to .env before the next call.'));
+        }
         console.log(C.dim('  Configuration saved to liber.yaml and applied in real-time.\n'));
       } else {
         const output = await getSlashCommands().models();

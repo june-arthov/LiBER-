@@ -1,5 +1,7 @@
 // src/daemon/liberd.js
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const llmManager = require('./llm/manager');
 const ConfigLoader = require('../utils/config-loader');
 const merlinEngine = require('./core/engine');
@@ -10,6 +12,7 @@ const trace = require('./core/trace');
 const auth = require('./core/auth');
 const policy = require('./core/policy');
 const journal = require('./core/journal');
+const modelSwitch = require('./core/model-switch');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -64,18 +67,20 @@ class LiberDaemon {
     }
   }
 
-  persistModelChange(newModel) {
+  persistModelChange(changes) {
     try {
-      const fs = require('fs');
-      const path = require('path');
       const cfgPath = path.resolve(process.cwd(), process.env.LIBER_CONFIG || 'liber.yaml');
       if (fs.existsSync(cfgPath)) {
-        let raw = fs.readFileSync(cfgPath, 'utf8');
-        raw = raw.replace(/model:\s*["'][^"']+["']/, `model: "${newModel}"`);
-        fs.writeFileSync(cfgPath, raw, 'utf8');
+        const raw = fs.readFileSync(cfgPath, 'utf8');
+        const patched = modelSwitch.patchEngineYaml(raw, changes);
+        if (patched !== raw) {
+          const tmp = `${cfgPath}.tmp`;
+          fs.writeFileSync(tmp, patched, 'utf8');
+          fs.renameSync(tmp, cfgPath);
+        }
       }
     } catch (e) {
-      console.error(`[liberd] Failed to update liber.yaml: ${e.message}`);
+      logger.error('SYSTEM', 'MODEL_PERSIST_FAILED', { error: e.message });
     }
   }
 
@@ -211,16 +216,37 @@ class LiberDaemon {
       else if (endpoint === '/model/switch') {
         let body = '';
         for await (const chunk of req) body += chunk;
-        const { model } = JSON.parse(body || '{}');
-        if (!model) throw new Error("Missing 'model' parameter.");
-
-        for (const [id, agent] of this.agents.entries()) {
-          agent.config.engine.model = model;
-          llmManager.initialize(agent.config.engine);
+        const spec = modelSwitch.validateSwitch(JSON.parse(body || '{}'));
+        if (spec.error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: spec.error }));
+          return;
         }
 
-        this.persistModelChange(model);
-        res.end(JSON.stringify({ success: true, active: model }));
+        const changed = {};
+        for (const [id, agent] of this.agents.entries()) {
+          const engine = agent.config.engine;
+          let keyResolved = true;
+          if (spec.provider && engine.provider !== spec.provider) {
+            engine.provider = spec.provider;
+            const key = ConfigLoader.resolveApiKey(spec.provider);
+            if (key) engine.apiKey = key;
+            else keyResolved = false;
+          }
+          engine.model = spec.model;
+          if (spec.endpoint) engine.endpoint = spec.endpoint;
+          llmManager.initialize(engine);
+          changed[id] = { ...modelSwitch.sanitizeEngine(engine), key_resolved: keyResolved };
+        }
+
+        this.persistModelChange({ provider: spec.provider, model: spec.model, endpoint: spec.endpoint });
+
+        const first = Array.from(this.agents.values())[0];
+        res.end(JSON.stringify({
+          success: true,
+          active: first ? modelSwitch.sanitizeEngine(first.config.engine) : { model: spec.model, provider: spec.provider, endpoint: spec.endpoint },
+          changed
+        }));
       }
       else if (endpoint === '/chat/stream') {
         res.setHeader('Content-Type', 'text/event-stream');
