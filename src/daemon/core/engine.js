@@ -546,7 +546,12 @@ class MerlinEngine {
         // Second pass: does a receipt actually entail the claim, not merely exist?
         if (cfg.enabled && cfg.semantic_verifier && verdict.passed && ledger.entries.length) {
           try {
-            const sem = await verifier.verify({ candidate, ledger, llmManager });
+            const sem = await verifier.verify({
+              candidate,
+              ledger,
+              llmManager,
+              disclosed: grounding.disclosedSpans(candidate)
+            });
             if (sem.unsupported.length) {
               verdict = {
                 ...verdict,

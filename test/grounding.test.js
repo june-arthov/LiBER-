@@ -112,6 +112,23 @@ test('annotation never hides the unresolved claims', () => {
   assert.match(out, /I fixed the bug/);
 });
 
+test('annotation uses a clean footer without box borders', () => {
+  const ledger = new EvidenceLedger('t-border');
+  ledger.record('read_file', { path: 'package.json' }, { content: '{}', total_lines: 1, lines_read: 1 });
+  const r = grounding.audit('package.json declares version 9.9.9 [E1].', ledger);
+  const out = grounding.annotate('answer', r, ledger);
+  assert.match(out, /GROUNDING AUDIT/);
+  assert.ok(!/───|╭|╮|├|┤|╰|╯|═/.test(out), 'no box-drawing or dash borders in the footer');
+});
+
+test('disclosedSpans extracts what the answer marks UNVERIFIED', () => {
+  const text = 'No. UNVERIFIED: the project has 100 tests — no tool receipt. The version is 0.5.0 [E1].';
+  const spans = grounding.disclosedSpans(text);
+  assert.equal(spans.length, 1);
+  assert.match(spans[0], /UNVERIFIED: the project has 100 tests/);
+  assert.ok(!spans[0].includes('The version'), 'span must stop at the sentence boundary');
+});
+
 test('a cited receipt that never mentions the file is rejected deterministically', () => {
   const ledger = new EvidenceLedger('d1');
   const ev = ledger.record('read_file', { path: 'src/other.js' }, { content: '1 | x', total_lines: 1, lines_read: 1 });

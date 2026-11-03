@@ -367,18 +367,34 @@ function buildRepairMessage(result, ledger, attempt = 1, maxRepairs = 2) {
 }
 
 function annotate(text, result, ledger) {
-  const lines = ['', '', '─── GROUNDING AUDIT ───'];
-  lines.push(`⚠ ${result.violations.length} claim(s) below are NOT verified by any tool receipt. Do not treat them as fact:`);
+  const lines = ['', '⚠ GROUNDING AUDIT — the marked claims below are NOT verified by any tool receipt. Do not treat them as fact:'];
   for (const v of result.violations.slice(0, 8)) {
-    lines.push(`• [${v.code}] ${v.text} — ${v.hint}`);
+    lines.push(`  • [${v.code}] ${v.text} — ${v.hint}`);
   }
-  lines.push(`Receipts this turn: ${ledger.entries.length ? ledger.entries.map(e => e.id).join(', ') : 'none'}.`);
+  lines.push(`  Receipts this turn: ${ledger.entries.length ? ledger.entries.map(e => e.id).join(', ') : 'none'}.`);
   return `${String(text).trimEnd()}\n${lines.join('\n')}`;
+}
+
+/**
+ * Spans the answer itself already discloses as UNVERIFIED. The semantic
+ * verifier must never re-flag these: the syntactic gate already accepts the
+ * disclosure as honest, and re-punishing it creates an unresolvable repair loop.
+ */
+function disclosedSpans(text) {
+  const spans = [];
+  const re = /\bUNVERIFIED\s*:\s*(.*?)(?=\n|\.\s+[A-Z`*•\[]|\.?$)/gs;
+  let m;
+  while ((m = re.exec(text))) {
+    const span = m[0].replace(/\s+$/g, '').replace(/[.\s]+$/g, '');
+    if (span.length >= 10) spans.push(span);
+  }
+  return spans;
 }
 
 module.exports = {
   audit,
   annotate,
+  disclosedSpans,
   describeViolations,
   buildRepairMessage,
   stripCode,

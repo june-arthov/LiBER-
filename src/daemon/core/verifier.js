@@ -12,6 +12,7 @@ Rules:
 - General, time-stable knowledge (language semantics, algorithms, standard APIs) is acceptable without a receipt.
 - A citation to an existing receipt does not by itself make a claim supported.
 - Plans, questions, and offers are not claims.
+- Claims the ANSWER itself already marks as UNVERIFIED (e.g. "UNVERIFIED: ...") are disclosed as unsupported by the answer — they must NOT be listed, no matter how unsupported they look.
 
 Return ONLY valid JSON, no markdown:
 {"unsupported":[{"claim":"<short quote>","reason":"<why the receipts do not support it>","receipt":"<E# or null>"}]}
@@ -49,7 +50,7 @@ function parseVerdict(raw) {
   }
 }
 
-async function verify({ candidate, ledger, llmManager }) {
+async function verify({ candidate, ledger, llmManager, disclosed = [] }) {
   if (!candidate || !ledger || ledger.entries.length === 0) {
     return { unsupported: [], parse_error: false, skipped: true };
   }
@@ -59,11 +60,31 @@ async function verify({ candidate, ledger, llmManager }) {
     { role: 'user', content: `ANSWER:\n${String(candidate).slice(0, 6000)}\n\nRECEIPTS:\n${buildReceipts(ledger)}` }
   ];
 
+  // Explicit exemption list: spans the answer already marks UNVERIFIED.
+  if (disclosed.length) {
+    messages.push({
+      role: 'user',
+      content: `EXEMPT — the ANSWER already marks these as UNVERIFIED, so they are disclosed and must NOT appear in unsupported:\n${disclosed.map(d => `- ${d}`).join('\n')}`
+    });
+  }
+
   let lastRaw = '';
   for (let attempt = 1; attempt <= 2; attempt++) {
     lastRaw = await llmManager.generate(messages, { temperature: 0, max_tokens: 900 });
     const parsed = parseVerdict(lastRaw);
-    if (!parsed.parse_error) return parsed;
+    if (!parsed.parse_error) {
+      // Deterministic backstop: drop anything that is a disclosed span.
+      const filtered = disclosed.length
+        ? parsed.unsupported.filter(u => {
+            const claim = u.claim.toLowerCase();
+            return !disclosed.some(d => {
+              const span = d.toLowerCase();
+              return span.includes(claim) || claim.includes(span);
+            });
+          })
+        : parsed.unsupported;
+      return { ...parsed, unsupported: filtered };
+    }
 
     if (attempt === 1) {
       messages.push({ role: 'assistant', content: String(lastRaw).slice(0, 800) });

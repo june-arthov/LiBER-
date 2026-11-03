@@ -48,6 +48,34 @@ test('verify skips turns with no receipts', async () => {
   assert.deepEqual(result.unsupported, []);
 });
 
+test('claims the answer discloses as UNVERIFIED are dropped deterministically', async () => {
+  const ledger = new EvidenceLedger('v3');
+  ledger.record('read_file', { path: 'package.json' }, { content: '1 | {"version":"0.5.0"}', total_lines: 1, lines_read: 1 });
+
+  let calls = 0;
+  const llmManager = {
+    generate: async () => {
+      calls++;
+      return JSON.stringify({ unsupported: [
+        { claim: 'the project has 100 tests', reason: 'no receipt shows a test count' },
+        { claim: 'version 9.9.9', reason: 'not in the receipt' }
+      ] });
+    }
+  };
+
+  const res = await verify({
+    candidate: 'No. UNVERIFIED: the project has 100 tests — no tool receipt. The version is 9.9.9 [E1].',
+    ledger,
+    llmManager,
+    disclosed: ['UNVERIFIED: the project has 100 tests — no tool receipt']
+  });
+
+  assert.equal(res.parse_error, false);
+  assert.equal(res.unsupported.length, 1, 'the disclosed claim must be filtered out');
+  assert.equal(res.unsupported[0].claim, 'version 9.9.9');
+  assert.equal(calls, 1);
+});
+
 test('verify sends answer + receipts to the model and parses the reply', async () => {
   const ledger = new EvidenceLedger('v3');
   ledger.record('read_file', { path: 'package.json' }, { content: 'version 0.1.0', total_lines: 1, lines_read: 1 });

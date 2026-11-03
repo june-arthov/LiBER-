@@ -53,6 +53,10 @@ npm install
 npm link
 ```
 
+> **Linux/WSL:** `npm link` writes a symlink into `/usr/lib/node_modules` and fails
+> with `EACCES` as a normal user — run `sudo npm link`, or skip linking entirely and
+> start the CLI with `node bin/liber` (everything else works the same).
+
 *(Optional Python TUI dependencies)*
 ```bash
 pip install rich textual httpx

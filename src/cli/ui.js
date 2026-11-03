@@ -3,6 +3,10 @@ const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
 
+// Single source of truth for branding: never hardcode a version in the UI.
+const pkg = require('../../package.json');
+const VERSION = pkg.version || '0.0.0';
+
 // Terminal capability detection: default to rich colors unless explicitly disabled with NO_COLOR
 const noColor = process.env.NO_COLOR !== undefined;
 
@@ -60,16 +64,17 @@ function printAgyBanner(info = {}) {
   const cwd = process.cwd();
   const displayCwd = cwd.length > (innerWidth - 8) ? '...' + cwd.slice(-(innerWidth - 11)) : cwd;
 
-  const titleBar = C.cyan(C.bold(' LIBER 2.0 '));
+  const titleBar = C.cyan(C.bold(` LIBER v${VERSION} `));
   const titleLen = stripAnsi(titleBar).length;
   const topBar = C.darkDim('  ╭─') + titleBar + C.darkDim('─'.repeat(Math.max(0, innerWidth - titleLen)) + '─╮');
   const bottomBar = C.darkDim('  ╰─') + C.darkDim('─'.repeat(innerWidth) + '─╯');
 
   const label = C.cyan(C.bold('▲ LIBER TERMINAL')) + C.dim('  Autonomous AI Agent Orchestrator');
-  const ver = C.purple('v0.2.0');
+  const ver = C.purple(`v${VERSION}`);
   const padLen = Math.max(0, innerWidth - stripAnsi(label).length - stripAnsi(ver).length);
   const row1 = label + ' '.repeat(padLen) + ver;
-  const row2 = C.dim('Agent: ') + C.bold(C.sky(agent)) + '  ' + C.dim('Model: ') + C.amber(model) + '  ' + C.dim('Daemon: ') + C.dim(`:${port}`) + ' [' + status + ']';
+  const host = info.host || '127.0.0.1';
+  const row2 = C.dim('Agent: ') + C.bold(C.sky(agent)) + '  ' + C.dim('Model: ') + C.amber(model) + '  ' + C.dim('Daemon: ') + C.dim(`${host}:${port}`) + ' [' + status + ']';
   const row3 = C.dim('Dir: ') + C.dim(displayCwd);
 
   console.log();
