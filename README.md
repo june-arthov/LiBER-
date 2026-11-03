@@ -18,7 +18,7 @@ Infused with the **Merlin Agent Cognitive Core** (`G:\Merlin Agent\Merlin-Agent`
 - **Cognitive Pulse (`[THOUGHT: ...]`)**: Pre-action reasoning before invoking tools.
 - **Merlin Tool Suite:** First-class surgical file manipulation, fuzzy patching, command execution, structured planning, and cross-session memory.
 - **Dual Surface:**
-  - **Agy Terminal:** Clean VT100/TrueColor streaming CLI interface.
+  - **LiBER Terminal:** Clean VT100/TrueColor streaming CLI interface.
   - **Tactical Cyber-Obsidian TUI:** Full Textual + Rich reactive telemetry dashboard with Human-In-The-Loop (HITL) safety breakpoints.
 
 ---
@@ -73,7 +73,7 @@ OLLAMA_CLOUD_API_KEY=your_key_here
 liber spawn
 ```
 
-#### Launch Interactive Agy Terminal
+#### Launch Interactive LiBER Terminal
 ```powershell
 liber
 ```
@@ -118,7 +118,7 @@ When intercepted, execution pauses and alerts the operator:
 
 ```text
 [Operator Interface]
-  ├─ Agy Terminal (CLI REPL)
+  ├─ LiBER Terminal (CLI REPL)
   └─ Cyber-Obsidian Dashboard (Textual TUI)
             │
             │ HTTP / Server-Sent Events (SSE)
@@ -138,3 +138,4 @@ When intercepted, execution pauses and alerts the operator:
 
 ## 📜 License
 MIT © 2026 June Arthov
+

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bin/liber — Liber AI Agent Orchestrator CLI (Agy Terminal Interface)
+// bin/liber — Liber AI Agent Orchestrator CLI
 const { Command } = require('commander');
 const http = require('http');
 const path = require('path');
@@ -14,7 +14,7 @@ const PORT = parseInt(process.env.LIBER_PORT || '4567', 10);
 const program = new Command();
 program
   .name('liber')
-  .description('Minimalist-Utilitarian AI Agent Orchestrator — Agy Terminal')
+  .description('Minimalist-Utilitarian AI Agent Orchestrator — LiBER Terminal')
   .version('0.2.0');
 
 // HTTP request helper to daemon
@@ -202,7 +202,7 @@ function getSlashCommands() {
   };
 }
 
-// COMMAND: Default interactive Agy Terminal launcher
+// COMMAND: Default interactive terminal launcher
 async function runInteractive(targetAgent) {
   try {
     await ensureDaemon();
@@ -277,7 +277,7 @@ program
 // COMMAND: chat
 program
   .command('chat [agentId] [message...]')
-  .description('Send a message to an agent or open the interactive Agy Terminal')
+  .description('Send a message to an agent or open the interactive LiBER Terminal')
   .action(async (agentId, words) => {
     try {
       await ensureDaemon();
@@ -285,7 +285,7 @@ program
       const message = (words || []).join(' ');
 
       if (message) {
-        // One-shot execution with Agy formatting
+        // One-shot execution with formatting
         const res = await askAgent(targetAgent, message);
         ui.printAgentResponse(targetAgent, res);
       } else {
@@ -320,7 +320,7 @@ program
     }
   });
 
-// Default behavior when running `liber` with no arguments: Launch Agy Terminal
+// Default behavior when running `liber` with no arguments: Launch LiBER Terminal
 if (process.argv.length <= 2) {
   runInteractive();
 } else {

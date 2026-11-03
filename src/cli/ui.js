@@ -49,7 +49,7 @@ function formatBoxRow(content, innerWidth) {
   return '  ' + C.darkDim('│') + ' ' + content + ' '.repeat(pad) + ' ' + C.darkDim('│');
 }
 
-// Modern Agy Terminal Header Banner
+// Modern LiBER Terminal Header Banner
 function printAgyBanner(info = {}) {
   const width = Math.max(getCols(), 76);
   const innerWidth = width - 2;
@@ -65,7 +65,10 @@ function printAgyBanner(info = {}) {
   const topBar = C.darkDim('  ╭─') + titleBar + C.darkDim('─'.repeat(Math.max(0, innerWidth - titleLen)) + '─╮');
   const bottomBar = C.darkDim('  ╰─') + C.darkDim('─'.repeat(innerWidth) + '─╯');
 
-  const row1 = C.cyan(C.bold('▲ AGY TERMINAL')) + C.dim('  Autonomous AI Agent Orchestrator') + ' '.repeat(Math.max(0, innerWidth - 56)) + C.purple('v0.2.0');
+  const label = C.cyan(C.bold('▲ LIBER TERMINAL')) + C.dim('  Autonomous AI Agent Orchestrator');
+  const ver = C.purple('v0.2.0');
+  const padLen = Math.max(0, innerWidth - stripAnsi(label).length - stripAnsi(ver).length);
+  const row1 = label + ' '.repeat(padLen) + ver;
   const row2 = C.dim('Agent: ') + C.bold(C.sky(agent)) + '  ' + C.dim('Model: ') + C.amber(model) + '  ' + C.dim('Daemon: ') + C.dim(`:${port}`) + ' [' + status + ']';
   const row3 = C.dim('Dir: ') + C.dim(displayCwd);
 
@@ -286,7 +289,7 @@ function startAgySession({ agent, port, ask, commands, getAgentInfo }) {
       ['/logs [n]', 'View recent telemetry events from liber.log'],
       ['/clear', 'Clear screen and refresh Agy banner'],
       ['/tui', 'Launch the blessed dashboard interface'],
-      ['/exit, /quit', 'Exit the Liber Agy Terminal'],
+      ['/exit, /quit', 'Exit the LiBER Terminal'],
     ];
 
     list.forEach(([cmd, desc]) => {
