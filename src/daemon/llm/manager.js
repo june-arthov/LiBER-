@@ -63,6 +63,9 @@ class LLMManager {
 
   async stream(messages, onChunk, options = {}) {
     if (!this.activeAdapter) throw new Error("LLM Engine not initialized. Call initialize() first.");
+    if (typeof this.activeAdapter.stream !== 'function') {
+      throw new Error('Active adapter does not support streaming.');
+    }
     return this.activeAdapter.stream(messages, onChunk, options);
   }
 }

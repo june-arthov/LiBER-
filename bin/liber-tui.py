@@ -434,6 +434,30 @@ class LiberApp(App):
         - telemetry -> Reactive updates on header and sidebar
         - final -> Output final answer
         """
+        # 0. Live draft stream (raw model output, not yet audited)
+        if event == "draft_start":
+            self.header_widget.state_label = "DRAFTING"
+            return
+        if event == "draft":
+            return
+        if event == "draft_end":
+            self.header_widget.state_label = "IDLE"
+            if data.get("failed"):
+                self.log_widget.write(
+                    Text.assemble(
+                        LiberCue.badge("DRAFT", "white on #F59E0B"),
+                        (" stream interrupted — falling back to a complete audited answer", "dim #F59E0B")
+                    )
+                )
+            else:
+                self.log_widget.write(
+                    Text.assemble(
+                        LiberCue.badge("DRAFT", "white on #8B5CF6"),
+                        (f" {data.get('chars', 0)} chars streamed · UNVERIFIED until the audit passes", "dim #A78BFA")
+                    )
+                )
+            return
+
         # 1. Thought / Reasoning
         if event == "thought":
             thought_text = data.get("content", "")

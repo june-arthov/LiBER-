@@ -231,6 +231,7 @@ class MerlinEngine {
     const requestStartTime = Date.now();
     const callCounts = new Map();
     const usageTotals = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    let streamedAny = false;
 
     onEvent('start', {
       agentId,
@@ -264,12 +265,39 @@ class MerlinEngine {
       });
 
       const llmStart = Date.now();
-      let response;
-      try {
-        response = await llmManager.generate(messages);
-      } catch (err) {
-        logger.error(agentId, 'LLM_ERROR', { error: err.message });
-        response = `Error: LLM provider unavailable (${err.message})`;
+      let response = '';
+
+      if (agentConfig.engine?.stream === true && typeof llmManager.stream === 'function') {
+        try {
+          let started = false;
+          await llmManager.stream(messages, (delta) => {
+            if (!delta) return;
+            if (!started) {
+              started = true;
+              onEvent('draft_start', { model: agentConfig.engine?.model });
+            }
+            response += delta;
+            onEvent('draft', { delta });
+          });
+          if (started) {
+            streamedAny = true;
+            onEvent('draft_end', { chars: response.length });
+          }
+        } catch (err) {
+          logger.error(agentId, 'LLM_STREAM_ERROR', { error: err.message, chars: response.length });
+          onEvent('draft_end', { chars: response.length, failed: true });
+          // A partial stream is not trustworthy. Discard it and get a complete answer.
+          response = '';
+        }
+      }
+
+      if (!response) {
+        try {
+          response = await llmManager.generate(messages);
+        } catch (err) {
+          logger.error(agentId, 'LLM_ERROR', { error: err.message });
+          response = `Error: LLM provider unavailable (${err.message})`;
+        }
       }
       const llmMs = Math.max(1, Date.now() - llmStart);
       const usage = typeof llmManager.getLastUsage === 'function' ? llmManager.getLastUsage() : null;
@@ -472,6 +500,7 @@ class MerlinEngine {
       response: finalResponse,
       grounded: auditResult ? auditResult.passed : null,
       usage: usageReport,
+      streamed: streamedAny,
       trace,
       durationMs: Date.now() - requestStartTime,
       iterations: iteration,

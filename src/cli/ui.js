@@ -264,9 +264,40 @@ function truncateText(value, max = 400) {
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
+// Live DRAFT preview (raw model output, not yet audited)
+let draftBuffer = '';
+
+function renderDraftPreview() {
+  if (!process.stdout.isTTY) return;
+  const clean = draftBuffer.replace(/\s+/g, ' ');
+  const limit = Math.max(40, getCols() - 10);
+  const tail = clean.length > limit ? '…' + clean.slice(-limit) : clean;
+  process.stdout.write('\r\x1b[2K  ' + C.purple('✎ draft ') + C.dim(tail));
+}
+
 // Render a daemon SSE event live in the terminal
 function printStreamEvent(event, data = {}) {
   switch (event) {
+    case 'draft_start':
+      draftBuffer = '';
+      renderDraftPreview();
+      break;
+
+    case 'draft':
+      draftBuffer += data.delta || '';
+      renderDraftPreview();
+      break;
+
+    case 'draft_end':
+      if (process.stdout.isTTY) process.stdout.write('\r\x1b[2K');
+      if (data.failed) {
+        console.log('  ' + C.amber('✎ draft interrupted — falling back to a complete, audited completion'));
+      } else if (draftBuffer.length) {
+        console.log('  ' + C.darkDim(`✎ draft · ${draftBuffer.length} chars streamed · UNVERIFIED until the grounding audit passes`));
+      }
+      draftBuffer = '';
+      break;
+
     case 'thought':
       if (data.content) printThought(data.content);
       break;

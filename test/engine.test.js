@@ -268,3 +268,101 @@ test('a thought containing citation brackets is not truncated', () => {
   const text = engine.extractThought('[THOUGHT: version is 0.1.0 [E1] so it matches] [FINAL: ok [E1]]');
   assert.match(text, /\[E1\] so it matches/);
 });
+
+test('streams drafts and still audits the final answer', async () => {
+  let call = 0;
+  const llm = {
+    async stream(messages, onChunk) {
+      call++;
+      const text = call === 1
+        ? '[TOOL: read_file({"path": "package.json"})]'
+        : '[FINAL: package.json declares version 0.1.0 [E1].]';
+      for (let i = 0; i < text.length; i += 12) onChunk(text.slice(i, i + 12));
+      return text;
+    },
+    async generate() {
+      throw new Error('generate must not run when streaming succeeds');
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-stream',
+    agentConfig: { ...cfg(), engine: { model: 'fixture', stream: true } },
+    userMessage: 'what version?',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 5
+  });
+
+  assert.equal(res.streamed, true);
+  assert.ok(events.filter(x => x.e === 'draft').length > 0);
+  assert.ok(events.some(x => x.e === 'draft_end' && !x.d.failed));
+  assert.equal(res.grounding.status, 'PASS', JSON.stringify(res.grounding.violations));
+});
+
+test('falls back to a full completion when streaming fails immediately', async () => {
+  let generated = 0;
+  const llm = {
+    async stream() {
+      throw new Error('socket hang up');
+    },
+    async generate() {
+      generated++;
+      return '[FINAL: ok]';
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const res = await engine.runTurn({
+    agentId: 't-stream-fallback',
+    agentConfig: { ...cfg(), engine: { model: 'fixture', stream: true } },
+    userMessage: 'hello',
+    memory,
+    llmManager: llm,
+    onEvent: () => {},
+    maxLoops: 3
+  });
+
+  assert.equal(generated, 1);
+  assert.equal(res.streamed, false);
+  assert.equal(res.grounding.status, 'PASS');
+});
+
+test('discards a partial stream and completes through generate', async () => {
+  let generated = 0;
+  const events = [];
+  const llm = {
+    async stream(messages, onChunk) {
+      onChunk('partial text that is not')
+      throw new Error('socket hang up');
+    },
+    async generate() {
+      generated++;
+      return '[FINAL: ok]';
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const res = await engine.runTurn({
+    agentId: 't-stream-partial',
+    agentConfig: { ...cfg(), engine: { model: 'fixture', stream: true } },
+    userMessage: 'hello',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 3
+  });
+
+  assert.equal(generated, 1);
+  assert.equal(res.streamed, false);
+  assert.ok(events.some(x => x.e === 'draft_end' && x.d.failed === true));
+});
