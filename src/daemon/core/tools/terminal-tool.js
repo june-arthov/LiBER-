@@ -1,6 +1,7 @@
 // src/daemon/core/tools/terminal-tool.js — Merlin Terminal Execution Engine
 const { exec } = require('child_process');
 const path = require('path');
+const policy = require('../policy');
 
 // Destructive patterns that strictly require Human-In-The-Loop approval
 const DESTRUCTIVE_PATTERNS = [
@@ -15,7 +16,29 @@ const DESTRUCTIVE_PATTERNS = [
   /\breboot\b/i,
   /\bkill\s+-9\b/i,
   /\bgit\s+push\s+--force\b/i,
-  /\bgit\s+reset\s+--hard\b/i
+  /\bgit\s+reset\s+--hard\b/i,
+  /\bgit\s+push\b/i,
+  /\bdiskpart\b/i,
+  /\breg\s+(add|delete|import)\b/i,
+  /\bbcdedit\b/i,
+  /\bnetsh\b/i,
+  /\bcurl[^\n|]*\|\s*(sh|bash|powershell|pwsh)\b/i,
+  /\bwget[^\n|]*\|\s*(sh|bash)\b/i
+];
+
+// Commands that change system/project state — blocked in read_only mode unless allowlisted
+const MUTATION_PATTERNS = [
+  /\b(npm|pnpm|yarn|bun)\s+(install|add|remove|update|upgrade|init|publish|login|logout|link|unlink|ci)\b/i,
+  /\b(pip|pip3|python\s+-m\s+pip)\s+(install|uninstall|upgrade)\b/i,
+  /\b(cargo|go)\s+(install|add|update)\b/i,
+  /\bgit\s+(commit|push|checkout|reset|rebase|merge|branch|tag|clean|revert|cherry-pick|rm|add)\b/i,
+  /\b(rm|del|erase|rmdir|mv|move|ren|rename|cp|copy|scp|rsync)\b/i,
+  /\b(set-content|out-file|add-content|new-item|remove-item|move-item|copy-item|rename-item|set-item)\b/i,
+  /\b(chmod|chown|sudo)\b/i,
+  /\b(format|diskpart|reg|bcdedit|netsh|schtasks|sc\s)\b/i,
+  />>\s*\S/,
+  /(^|[\s])>\s*\S/,
+  /\b(tee|clip)\b/i
 ];
 
 function isCommandSensitive(command) {
@@ -23,9 +46,56 @@ function isCommandSensitive(command) {
   return DESTRUCTIVE_PATTERNS.some(pattern => pattern.test(command));
 }
 
+/**
+ * Terminal policy: denylist always wins; allowlist mode requires a prefix;
+ * read_only blocks state-changing commands.
+ */
+function evaluatePolicy(command) {
+  const cmd = String(command || '').trim();
+  const term = policy.terminalConfig();
+  const lower = cmd.toLowerCase();
+
+  for (const pattern of term.denylist) {
+    if (pattern && lower.startsWith(String(pattern).toLowerCase())) {
+      return {
+        denied: true,
+        reason: `Command blocked by policy.terminal.denylist ('${pattern}').`
+      };
+    }
+  }
+
+  if (term.mode === 'allowlist') {
+    const ok = term.allowlist.some(p => p && lower.startsWith(String(p).toLowerCase()));
+    if (!ok) {
+      return {
+        denied: true,
+        reason: `Command not in policy.terminal.allowlist (mode 'allowlist').`
+      };
+    }
+    return { denied: false };
+  }
+
+  if (term.mode === 'read_only' && MUTATION_PATTERNS.some(pattern => pattern.test(cmd))) {
+    const allowed = term.allowlist.some(p => p && lower.startsWith(String(p).toLowerCase()));
+    if (!allowed) {
+      return {
+        denied: true,
+        reason: 'Command changes project/system state, blocked by read-only terminal policy. Allowlist it in liber.yaml or ask the operator to switch policy.terminal.mode.'
+      };
+    }
+  }
+
+  return { denied: false };
+}
+
 async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }) {
   if (!command || typeof command !== 'string') {
     return { error: "Missing or invalid command argument." };
+  }
+
+  const decision = evaluatePolicy(command);
+  if (decision.denied) {
+    return { error: decision.reason, policy_denied: true, command };
   }
 
   const startTime = Date.now();
@@ -82,5 +152,6 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }) {
 
 module.exports = {
   runTerminal,
-  isCommandSensitive
+  isCommandSensitive,
+  evaluatePolicy
 };

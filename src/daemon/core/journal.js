@@ -1,6 +1,7 @@
 // src/daemon/core/journal.js — crash-safe turn journal for resume.
 const fs = require('fs');
 const path = require('path');
+const secrets = require('./secrets');
 
 function dir() {
   return path.resolve(process.cwd(), '.liber', 'turns');
@@ -20,7 +21,15 @@ function save(state) {
     fs.mkdirSync(dir(), { recursive: true });
     const file = fileFor(state.agentId);
     const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ ...state, saved_at: new Date().toISOString() }), 'utf8');
+    const payload = {
+      ...state,
+      userMessage: secrets.redact(state.userMessage),
+      messages: Array.isArray(state.messages)
+        ? state.messages.map(m => ({ ...m, content: secrets.redact(m.content) }))
+        : state.messages,
+      saved_at: new Date().toISOString()
+    };
+    fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
     fs.renameSync(tmp, file);
     return file;
   } catch {

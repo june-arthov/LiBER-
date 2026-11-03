@@ -190,6 +190,46 @@ function deterministicCheck(sentence, cites, ledger) {
     }
   }
 
+  // Quoted strings must be visible in the cited receipt's evidence.
+  const quoted = [...stripped.matchAll(/[`'"]{1}([^`'"]{4,80})[`'"]{1}/g)].map(m => m[1]);
+  if (quoted.length) {
+    const checkable = entries.filter(e => !['search', 'todo', 'task'].includes(e.kind));
+    if (checkable.length) {
+      const found = quoted.some(q =>
+        checkable.some(e => `${e.detail || ''} ${e.excerpt || ''} ${e.target || ''}`.includes(q))
+      );
+      if (!found) {
+        violations.push({
+          code: 'STRING_UNSUPPORTED',
+          text: sentence,
+          hint: `The cited receipt does not contain '${quoted[0]}'. Verify it with a tool or mark the claim UNVERIFIED.`
+        });
+      }
+    }
+  }
+
+  // Line-number claims must match the receipt's rendered line prefixes.
+  const lineMatch = stripped.match(/\bline\s+(\d{1,6})\b/i);
+  if (lineMatch) {
+    const readEntries = entries.filter(e => e.kind === 'read');
+    if (readEntries.length) {
+      const lineNo = String(parseInt(lineMatch[1], 10));
+      const prefixPadded = lineNo.padStart(4, '0') + ' |';
+      const prefixLoose = new RegExp(`\\b${lineNo}\\s*\\|`);
+      const found = readEntries.some(e => {
+        const detail = String(e.detail || '');
+        return detail.includes(prefixPadded) || prefixLoose.test(detail);
+      });
+      if (!found) {
+        violations.push({
+          code: 'LINE_UNSUPPORTED',
+          text: sentence,
+          hint: `The cited receipt does not show line ${lineNo}. Read the right region or mark the claim UNVERIFIED.`
+        });
+      }
+    }
+  }
+
   return violations;
 }
 
@@ -201,6 +241,8 @@ const FIX_HINTS = {
   SEMANTIC_UNSUPPORTED: 'The cited receipt does not entail this claim. Verify it with a tool, remove it, or mark it UNVERIFIED.',
   PATH_UNSUPPORTED: 'The cited receipt does not mention that file. Cite the receipt that actually read it, or mark the claim UNVERIFIED.',
   NUMBER_UNSUPPORTED: 'The cited receipt does not contain that number. Re-check the receipt, verify with a tool, or mark the claim UNVERIFIED.',
+  STRING_UNSUPPORTED: 'The cited receipt does not contain that quoted string. Verify it with a tool or mark the claim UNVERIFIED.',
+  LINE_UNSUPPORTED: 'The cited receipt does not show that line. Read the right region or mark the claim UNVERIFIED.',
   PENDING_MUTATION_UNVERIFIED: 'A file was changed but never read back. Call read_file on each changed path (or run the test suite), then cite the receipt.',
   UNGROUNDED_FACT: 'Verify with terminal (`date`, `<tool> --version`) or fetch_url of the primary source, then cite it.'
 };
@@ -239,6 +281,14 @@ function audit(text, ledger, opts = {}) {
 
       if (isHedged(sentence) || /\?\s*$/.test(sentence) || isImperative(sentence)) continue;
 
+      // Deterministic receipt checks run for ANY cited sentence, even ones that
+      // carry no env/action/success claim (e.g. "file.txt line 99 says ...").
+      if (cites.length) {
+        for (const v of deterministicCheck(sentence, cites, ledger)) {
+          add(v.code, sentence, v.hint, li + 1);
+        }
+      }
+
       const env = envClaim(sentence, ledger);
       const action = actionClaim(sentence);
       const success = successClaim(sentence, ledger);
@@ -267,12 +317,6 @@ function audit(text, ledger, opts = {}) {
         const supported = ledger.entries.some(e => e.ok && (e.kind === 'command' || e.kind === 'fetch' || e.tool === 'web_search'));
         if (!supported) {
           add('UNGROUNDED_FACT', sentence, FIX_HINTS.UNGROUNDED_FACT, li + 1);
-        }
-      }
-
-      if (cites.length) {
-        for (const v of deterministicCheck(sentence, cites, ledger)) {
-          add(v.code, sentence, v.hint, li + 1);
         }
       }
 

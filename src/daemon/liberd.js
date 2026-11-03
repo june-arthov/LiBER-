@@ -154,6 +154,7 @@ class LiberDaemon {
         success: false,
         error: 'Unauthorized. Send Authorization: Bearer <token> (token: .liber/daemon.token).'
       }));
+      logger.warn('SYSTEM', 'AUTH_FAILED', { endpoint, ip: req.socket.remoteAddress });
       return;
     }
 

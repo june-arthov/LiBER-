@@ -137,3 +137,31 @@ test('aggregated task receipts support child findings without path checks', () =
   const r = grounding.audit(`package.json version is 0.1.0 [${ev.id}].`, ledger);
   assert.equal(r.passed, true, JSON.stringify(r.violations));
 });
+
+test('quoted strings must be visible in the cited receipt', () => {
+  const ledger = new EvidenceLedger('d4');
+  const ev = ledger.record('read_file', { path: 'package.json' }, { content: '1 | {"version":"0.1.0"}', total_lines: 1, lines_read: 1 });
+
+  const wrong = grounding.audit(`package.json declares version \`9.9.9\` [${ev.id}].`, ledger);
+  assert.equal(wrong.passed, false);
+  assert.ok(wrong.violations.some(v => v.code === 'STRING_UNSUPPORTED'));
+
+  const right = grounding.audit(`package.json declares version \`0.1.0\` [${ev.id}].`, ledger);
+  assert.equal(right.passed, true, JSON.stringify(right.violations));
+});
+
+test('line-number claims must match the receipt region', () => {
+  const ledger = new EvidenceLedger('d5');
+  const ev = ledger.record('read_file', { path: 'file.txt', offset: 1, limit: 20 }, {
+    content: '0001 | alpha\n0002 | beta',
+    total_lines: 2,
+    lines_read: 2
+  });
+
+  const wrong = grounding.audit(`file.txt line 99 says nothing [${ev.id}].`, ledger);
+  assert.equal(wrong.passed, false);
+  assert.ok(wrong.violations.some(v => v.code === 'LINE_UNSUPPORTED'));
+
+  const right = grounding.audit(`file.txt line 2 is beta [${ev.id}].`, ledger);
+  assert.equal(right.passed, true, JSON.stringify(right.violations));
+});

@@ -60,3 +60,32 @@ test('the patch tool refuses an outside path', async () => {
   });
   assert.equal(res.policy_denied, true);
 });
+
+test('read_only terminal policy blocks mutations but allows the allowlist', () => {
+  const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'read_only', allowlist: ['npm test'], denylist: [] } });
+
+  assert.equal(evaluatePolicy('npm install express').denied, true);
+  assert.equal(evaluatePolicy('npm test').denied, false);
+  assert.equal(evaluatePolicy('git status').denied, false);
+  assert.equal(evaluatePolicy('git commit -m x').denied, true);
+  assert.equal(evaluatePolicy('echo hi > out.txt').denied, true);
+  assert.equal(evaluatePolicy('node -v').denied, false);
+  assert.equal(evaluatePolicy('rm -rf node_modules').denied, true);
+});
+
+test('allowlist terminal policy only runs listed prefixes', () => {
+  const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'allowlist', allowlist: ['node', 'git status'], denylist: [] } });
+
+  assert.equal(evaluatePolicy('node -v').denied, false);
+  assert.equal(evaluatePolicy('git status').denied, false);
+  assert.equal(evaluatePolicy('git log').denied, true);
+});
+
+test('terminal denylist wins in every mode', () => {
+  const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'prompt', allowlist: [], denylist: ['shutdown'] } });
+  assert.equal(evaluatePolicy('shutdown /s').denied, true);
+  assert.equal(evaluatePolicy('dir').denied, false);
+});

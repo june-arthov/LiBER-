@@ -46,6 +46,10 @@ skills:
 policy:
   write_roots: ["."]            # relative to the daemon's working directory
   allow_outside_workspace: false # true allows write_file/patch outside write_roots
+  terminal:
+    mode: "read_only"            # read_only: block state-changing commands · allowlist: only the list · prompt: HITL only
+    allowlist: ["npm test", "node --test", "git add", "git commit", "git push"]
+    denylist: []
 
 memory:
   strategy: "sliding-window"

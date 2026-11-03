@@ -1,6 +1,7 @@
 // src/daemon/core/trace.js — append-only audit trail of completed turns.
 const fs = require('fs');
 const path = require('path');
+const secrets = require('./secrets');
 
 function traceDir() {
   return path.resolve(process.cwd(), '.liber', 'traces');
@@ -19,8 +20,8 @@ function appendTurn({ agentId, userMessage, result, model }) {
       ts: new Date().toISOString(),
       agentId,
       model: model || null,
-      user: String(userMessage || '').slice(0, 500),
-      response: String(result?.response || '').slice(0, 4000),
+      user: secrets.redact(String(userMessage || '')).slice(0, 500),
+      response: secrets.redact(String(result?.response || '')).slice(0, 4000),
       grounded: result?.grounded ?? null,
       grounding_status: grounding.status || null,
       repairs: result?.repairs ?? 0,

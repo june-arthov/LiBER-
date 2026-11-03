@@ -4,7 +4,8 @@ const path = require('path');
 
 const DEFAULTS = {
   write_roots: ['.'],
-  allow_outside_workspace: false
+  allow_outside_workspace: false,
+  terminal: { mode: 'prompt', allowlist: [], denylist: [] }
 };
 
 let config = { ...DEFAULTS };
@@ -14,13 +15,24 @@ function configure(policyConfig = {}) {
     write_roots: Array.isArray(policyConfig.write_roots) && policyConfig.write_roots.length
       ? policyConfig.write_roots
       : DEFAULTS.write_roots,
-    allow_outside_workspace: policyConfig.allow_outside_workspace === true
+    allow_outside_workspace: policyConfig.allow_outside_workspace === true,
+    terminal: {
+      mode: ['read_only', 'allowlist', 'prompt'].includes(policyConfig.terminal?.mode)
+        ? policyConfig.terminal.mode
+        : DEFAULTS.terminal.mode,
+      allowlist: (policyConfig.terminal?.allowlist || []).map(String),
+      denylist: (policyConfig.terminal?.denylist || []).map(String)
+    }
   };
   return config;
 }
 
 function current() {
   return { ...config };
+}
+
+function terminalConfig() {
+  return { ...config.terminal, allowlist: [...config.terminal.allowlist], denylist: [...config.terminal.denylist] };
 }
 
 function normalize(p) {
@@ -74,6 +86,7 @@ function isOutsideWorkspace(filePath) {
 module.exports = {
   configure,
   current,
+  terminalConfig,
   checkWrite,
   isOutsideWorkspace,
   roots

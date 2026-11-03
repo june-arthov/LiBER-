@@ -1,6 +1,7 @@
 // src/daemon/core/memory.js — sliding window + optional session persistence.
 const fs = require('fs');
 const path = require('path');
+const secrets = require('./secrets');
 
 class MemoryManager {
   constructor(windowSize = 10) {
@@ -36,7 +37,13 @@ class MemoryManager {
     try {
       fs.mkdirSync(path.dirname(this.persistPath), { recursive: true });
       const sessions = {};
-      for (const [agentId, messages] of this.history.entries()) sessions[agentId] = messages;
+      for (const [agentId, messages] of this.history.entries()) {
+        // Credentials must never reach disk, even if the model echoed them.
+        sessions[agentId] = messages.map(m => ({
+          role: m.role,
+          content: secrets.redact(m.content)
+        }));
+      }
       fs.writeFileSync(
         this.persistPath,
         JSON.stringify({ version: 1, updated_at: new Date().toISOString(), sessions }, null, 2),
