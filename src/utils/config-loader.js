@@ -78,6 +78,18 @@ class ConfigLoader {
       const config = yaml.load(fileContents);
 
       // 2. Secret Management: provider-aware key from environment or .env
+      const engine = config.agent?.engine;
+      if (engine && !engine.provider) {
+        // A null provider used to kill the whole daemon at boot
+        // ("Unsupported LLM provider: null"). Fall back to the OpenAI-compatible
+        // adapter the config comment already promises, and say so out loud.
+        engine.provider = 'openai';
+        console.warn('[config] engine.provider was empty — defaulting to the openai-compatible adapter.');
+      }
+      if (engine && !engine.endpoint) {
+        console.warn('[config] engine.endpoint is empty — every request will fail until a provider endpoint is set.');
+      }
+
       const provider = (config.agent?.engine?.provider || 'openai').toLowerCase();
       const envKey = resolveApiKey(provider);
 

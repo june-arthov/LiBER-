@@ -98,6 +98,8 @@ class GeminiAdapter extends LLMAdapter {
     const decoder = new TextDecoder();
     let buffer = '';
     let full = '';
+    let reasoning = '';
+    const onReasoning = typeof options.onReasoning === 'function' ? options.onReasoning : () => {};
 
     const handleLine = (raw) => {
       const line = raw.trim();
@@ -106,8 +108,14 @@ class GeminiAdapter extends LLMAdapter {
         const json = JSON.parse(line.slice(5).trim());
         for (const part of json.candidates?.[0]?.content?.parts || []) {
           if (typeof part.text === 'string' && part.text) {
-            full += part.text;
-            onChunk(part.text);
+            // Gemini marks thought summaries with thought:true.
+            if (part.thought === true) {
+              reasoning += part.text;
+              onReasoning(part.text);
+            } else {
+              full += part.text;
+              onChunk(part.text);
+            }
           }
         }
         const usage = json.usageMetadata;
@@ -132,6 +140,7 @@ class GeminiAdapter extends LLMAdapter {
     buffer += decoder.decode();
     if (buffer.trim()) handleLine(buffer);
 
+    if (reasoning.trim()) this.lastReasoning = reasoning;
     return full;
   }
 }

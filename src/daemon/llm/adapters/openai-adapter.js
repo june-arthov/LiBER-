@@ -22,6 +22,7 @@ class OpenAIAdapter extends LLMAdapter {
       throw new Error('HTTP ' + response.status + ': ' + (data.error?.message || data.error || response.statusText));
     }
     this.lastUsage = data.usage || null;
+    this.lastReasoning = data.choices[0].message?.reasoning_content || data.choices[0].message?.reasoning || null;
     return data.choices[0].message.content;
   }
 
@@ -59,6 +60,7 @@ class OpenAIAdapter extends LLMAdapter {
 
     this.lastUsage = data.usage || null;
     const msg = data.choices[0].message || {};
+    this.lastReasoning = msg.reasoning_content || msg.reasoning || null;
     return {
       content: msg.content || '',
       tool_calls: Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : null,
@@ -67,6 +69,8 @@ class OpenAIAdapter extends LLMAdapter {
   }
 
   async stream(messages, onChunk, options = {}) {
+    // Reasoning models only stream reasoning_content when asked for it.
+    const effort = options.reasoning_effort ?? this.config.reasoning_effort;
     const response = await fetch(`${this.config.endpoint}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -79,6 +83,7 @@ class OpenAIAdapter extends LLMAdapter {
         temperature: options.temperature ?? this.config.temperature ?? 0.7,
         max_tokens: options.max_tokens || this.config.max_tokens || undefined,
         stream: true,
+        reasoning_effort: effort && effort !== 'auto' ? effort : undefined,
         // Ask the provider to emit a final usage chunk (OpenAI-compatible).
         stream_options: this.config.stream_usage === false ? undefined : { include_usage: true }
       })
@@ -93,6 +98,8 @@ class OpenAIAdapter extends LLMAdapter {
     const decoder = new TextDecoder();
     let buffer = '';
     let full = '';
+    let reasoning = '';
+    const onReasoning = typeof options.onReasoning === 'function' ? options.onReasoning : () => {};
 
     const handleLine = (raw) => {
       const line = raw.trim();
@@ -100,7 +107,15 @@ class OpenAIAdapter extends LLMAdapter {
       try {
         const json = JSON.parse(line.slice(5).trim());
         if (json.usage) this.lastUsage = json.usage;
-        const content = json.choices?.[0]?.delta?.content;
+        const delta = json.choices?.[0]?.delta;
+        if (!delta) return;
+        // DeepSeek / OpenRouter reasoners stream chain-of-thought here.
+        const thought = delta.reasoning_content ?? delta.reasoning;
+        if (typeof thought === 'string' && thought) {
+          reasoning += thought;
+          onReasoning(thought);
+        }
+        const content = delta.content;
         if (content) {
           full += content;
           onChunk(content);
@@ -124,6 +139,7 @@ class OpenAIAdapter extends LLMAdapter {
     buffer += decoder.decode();
     if (buffer.trim()) handleLine(buffer);
 
+    if (reasoning.trim()) this.lastReasoning = reasoning;
     return full;
   }
 }

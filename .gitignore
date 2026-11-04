@@ -31,3 +31,12 @@ desktop/.tmp/
 desktop/package-lock.json
 desktop/bin/
 
+# DSH sandbox ACL repair backups / layout research scratch
+.dsh-acl-recovery/
+.dsh-research/
+.preview/
+
+
+# Research / review scratch (extracted reference sources, screenshots)
+.tmp-review/
+.dsh-research/

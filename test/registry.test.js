@@ -29,6 +29,13 @@ test('near-miss key names are corrected with a suggestion', async () => {
   assert.match(res.error, /Did you mean 'path'/);
 });
 
+test('a key with no near match is rejected, not silently ignored', async () => {
+  const res = await registry.execute('read_file', { path: 'sample.txt', offsett: 2, bananas: 1 });
+  assert.equal(res.validation_failed, true, 'unknown arguments must not vanish');
+  assert.match(res.error, /Unknown argument 'bananas'/);
+  assert.match(res.error, /Accepted: path, offset, limit/);
+});
+
 test('enum violations are rejected', async () => {
   const res = await registry.execute('todo_list', { action: 'explode' });
   assert.equal(res.validation_failed, true);

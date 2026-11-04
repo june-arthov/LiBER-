@@ -21,15 +21,23 @@ class MemoryManager {
   }
 
   _load() {
-    if (!this.persistPath || !fs.existsSync(this.persistPath)) return;
-    try {
-      const data = JSON.parse(fs.readFileSync(this.persistPath, 'utf8'));
-      for (const [agentId, messages] of Object.entries(data.sessions || {})) {
-        if (Array.isArray(messages)) this.history.set(agentId, messages.slice(-this.windowSize));
+    if (!this.persistPath) return;
+    const candidates = [this.persistPath, `${this.persistPath}.bak`];
+    for (let i = 0; i < candidates.length; i++) {
+      const file = candidates[i];
+      if (!fs.existsSync(file)) continue;
+      try {
+        const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+        for (const [agentId, messages] of Object.entries(data.sessions || {})) {
+          if (Array.isArray(messages)) this.history.set(agentId, messages.slice(-this.windowSize));
+        }
+        if (i > 0) console.warn(`[liberd] session store was damaged — recovered ${this.history.size} session(s) from ${path.basename(file)}`);
+        return;
+      } catch {
+        // fall through to the backup, then to a clean start
       }
-    } catch {
-      // corrupt session file: start clean rather than crash the daemon
     }
+    if (fs.existsSync(this.persistPath)) console.warn('[liberd] session store unreadable and no backup — starting clean');
   }
 
   _save() {
@@ -44,11 +52,15 @@ class MemoryManager {
           content: secrets.redact(m.content)
         }));
       }
-      fs.writeFileSync(
-        this.persistPath,
-        JSON.stringify({ version: 1, updated_at: new Date().toISOString(), sessions }, null, 2),
-        'utf8'
-      );
+      const payload = JSON.stringify({ version: 1, updated_at: new Date().toISOString(), sessions }, null, 2);
+      // Write-then-rename: a crash mid-write leaves the previous file intact,
+      // and the previous file is kept as .bak for one more level of recovery.
+      const tmp = `${this.persistPath}.tmp`;
+      fs.writeFileSync(tmp, payload, 'utf8');
+      if (fs.existsSync(this.persistPath)) {
+        try { fs.copyFileSync(this.persistPath, `${this.persistPath}.bak`); } catch { /* best effort */ }
+      }
+      fs.renameSync(tmp, this.persistPath);
     } catch {
       // never let persistence break a turn
     }

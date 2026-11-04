@@ -144,6 +144,8 @@ class AnthropicAdapter extends LLMAdapter {
     const decoder = new TextDecoder();
     let buffer = '';
     let full = '';
+    let reasoning = '';
+    const onReasoning = typeof options.onReasoning === 'function' ? options.onReasoning : () => {};
 
     const handleLine = (raw) => {
       const line = raw.trim();
@@ -153,6 +155,11 @@ class AnthropicAdapter extends LLMAdapter {
         if (json.type === 'content_block_delta' && json.delta?.type === 'text_delta' && json.delta.text) {
           full += json.delta.text;
           onChunk(json.delta.text);
+        }
+        // Extended thinking streams as thinking_delta before the text blocks.
+        if (json.type === 'content_block_delta' && json.delta?.type === 'thinking_delta' && json.delta.thinking) {
+          reasoning += json.delta.thinking;
+          onReasoning(json.delta.thinking);
         }
         if (json.type === 'message_delta' && json.usage) {
           this.lastUsage = {
@@ -175,6 +182,7 @@ class AnthropicAdapter extends LLMAdapter {
     buffer += decoder.decode();
     if (buffer.trim()) handleLine(buffer);
 
+    if (reasoning.trim()) this.lastReasoning = reasoning;
     return full;
   }
 }

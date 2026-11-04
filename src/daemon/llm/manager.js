@@ -79,6 +79,11 @@ class LLMManager {
     return this.activeAdapter?.lastUsage || null;
   }
 
+  /** Chain of thought the provider returned on the most recent call, if any. */
+  getLastReasoning() {
+    return this.activeAdapter?.lastReasoning || null;
+  }
+
   async stream(messages, onChunk, options = {}) {
     if (!this.activeAdapter) throw new Error("LLM Engine not initialized. Call initialize() first.");
     if (typeof this.activeAdapter.stream !== 'function') {

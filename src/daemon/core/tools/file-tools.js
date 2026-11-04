@@ -182,6 +182,16 @@ async function searchFiles({ pattern, path: dirPath = ".", target = "content", f
   if (!fs.existsSync(root)) {
     return { error: `Directory not found: ${dirPath}` };
   }
+  // A file path used to return "0 matches" from the directory walk, which reads
+  // like proof of absence. Refuse it loudly instead: absence of evidence is not
+  // evidence of absence.
+  try {
+    if (fs.statSync(root).isFile()) {
+      return {
+        error: `'${dirPath}' is a file, not a directory. search_files walks a directory — pass its parent as path, or use read_file for one file.`
+      };
+    }
+  } catch { /* unreadable path: the walk below will report it */ }
 
   const results = [];
   const maxResults = Math.min(parseInt(limit, 10) || 50, 200);

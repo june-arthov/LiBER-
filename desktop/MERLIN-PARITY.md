@@ -1,5 +1,10 @@
 # Merlin → LiBER parity audit
 
+> **Superseded for the desktop shell (2026-11):** the shell now mirrors the DeepSeek Harness Web
+> GUI instead of Merlin. See [`DSH-LAYOUT.md`](DSH-LAYOUT.md) for the current frame, palette and
+> measurements. This audit remains the record of the earlier Merlin-derived design and of the
+> feature parity items that still carry over.
+
 What the reference desktop shell does, what LiBER does, and what is still missing.
 Status legend: **done** = implemented and exercised in this build · **partial** = present but narrower than the reference · **missing** = not implemented.
 

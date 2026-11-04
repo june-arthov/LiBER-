@@ -46,30 +46,58 @@ function isCommandSensitive(command) {
   return DESTRUCTIVE_PATTERNS.some(pattern => pattern.test(command));
 }
 
+// Characters that turn one command into several. A prefix match that runs past
+// one of these is not a prefix match any more — it is a different command.
+const CHAIN = /[;&|`<>]|\$\(/;
+
+/**
+ * Does `command` start with an allowlist entry and stay *inside* that entry?
+ * 'git status -s' matches 'git status'; 'git status; rm -rf /' does not.
+ */
+function matchesAllowEntry(list, lower) {
+  for (const rawEntry of list) {
+    const entry = String(rawEntry || '').trim().toLowerCase();
+    if (!entry) continue;
+    if (!lower.startsWith(entry)) continue;
+    const rest = lower.slice(entry.length);
+    if (rest !== '' && !/^\s/.test(rest)) continue; // 'git statusX' is not 'git status'
+    if (CHAIN.test(rest)) continue;                 // 'git status; evil' is not 'git status'
+    return true;
+  }
+  return false;
+}
+
 /**
  * Terminal policy: denylist always wins; allowlist mode requires a prefix;
- * read_only blocks state-changing commands.
+ * read_only blocks state-changing commands; prompt fails closed and reports
+ * that a human could approve (the engine escalates and re-dispatches).
  */
-function evaluatePolicy(command) {
+function evaluatePolicy(command, opts = {}) {
   const cmd = String(command || '').trim();
   const term = policy.terminalConfig();
   const lower = cmd.toLowerCase();
 
   for (const pattern of term.denylist) {
-    if (pattern && lower.startsWith(String(pattern).toLowerCase())) {
+    const p = String(pattern || '').trim().toLowerCase();
+    if (!p) continue;
+    const afterChain = CHAIN.test(cmd) && lower.includes(p);
+    if (lower.startsWith(p) || afterChain) {
       return {
         denied: true,
-        reason: `Command blocked by policy.terminal.denylist ('${pattern}').`
+        reason: `Command blocked by policy.terminal.denylist ('${pattern}'). A denylist entry cannot be approved away.`
       };
     }
   }
 
+  // Human approval overrides the *mode* gate (prompt/allowlist/read_only) only,
+  // never the denylist above.
+  if (opts.approved === true) return { denied: false, approved: true };
+
   if (term.mode === 'allowlist') {
-    const ok = term.allowlist.some(p => p && lower.startsWith(String(p).toLowerCase()));
-    if (!ok) {
+    if (!matchesAllowEntry(term.allowlist, lower)) {
       return {
         denied: true,
-        reason: `Command not in policy.terminal.allowlist (mode 'allowlist').`
+        reason: `Command not in policy.terminal.allowlist (mode 'allowlist'). Chained operators are not covered by a prefix entry.`
       };
     }
     return { denied: false };
@@ -79,9 +107,19 @@ function evaluatePolicy(command) {
     return { denied: false };
   }
 
+  if (term.mode === 'prompt') {
+    // Fail closed, and say a human could approve: the engine escalates on
+    // needs_approval and re-dispatches with meta.approved.
+    if (matchesAllowEntry(term.allowlist, lower)) return { denied: false };
+    return {
+      denied: true,
+      needs_approval: true,
+      reason: "Terminal mode 'prompt' needs human approval for unlisted commands. Allowlist the prefix for repeat use, or set policy.terminal.mode."
+    };
+  }
+
   if (term.mode === 'read_only' && MUTATION_PATTERNS.some(pattern => pattern.test(cmd))) {
-    const allowed = term.allowlist.some(p => p && lower.startsWith(String(p).toLowerCase()));
-    if (!allowed) {
+    if (!matchesAllowEntry(term.allowlist, lower)) {
       return {
         denied: true,
         reason: 'Command changes project/system state, blocked by read-only terminal policy. Allowlist it in liber.yaml or ask the operator to switch policy.terminal.mode.'
@@ -92,14 +130,21 @@ function evaluatePolicy(command) {
   return { denied: false };
 }
 
-async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }) {
+async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, meta = {}) {
   if (!command || typeof command !== 'string') {
     return { error: "Missing or invalid command argument." };
   }
 
-  const decision = evaluatePolicy(command);
+  const decision = evaluatePolicy(command, { approved: meta && meta.approved === true });
   if (decision.denied) {
-    return { error: decision.reason, policy_denied: true, command };
+    // Keep the escalation signal: a consumer (registry/engine) needs to know the
+    // difference between "policy says no" and "policy says ask a human".
+    return {
+      error: decision.reason,
+      policy_denied: true,
+      needs_approval: decision.needs_approval === true,
+      command
+    };
   }
 
   const startTime = Date.now();

@@ -58,8 +58,11 @@ function validateArgs(schema, args) {
     }
   }
 
-  // Catch the common hallucination: right idea, wrong key name.
+  // Catch the common hallucination: right idea, wrong key name. And never let an
+  // unknown key vanish silently — a typo'd argument would otherwise run the tool
+  // with the field missing, which reads exactly like a wrong result later.
   const unknown = Object.keys(input).filter(k => !(k in props));
+  const accepted = Object.keys(props);
   for (const key of unknown) {
     const near = Object.keys(props).find(p => {
       const a = p.toLowerCase();
@@ -71,6 +74,9 @@ function validateArgs(schema, args) {
     if (near) {
       errors.push(`Unknown argument '${key}'. Did you mean '${near}'?`);
       problems.push({ field: key, issue: 'did_you_mean', suggestion: near });
+    } else {
+      errors.push(`Unknown argument '${key}'. Accepted: ${accepted.length ? accepted.join(', ') : '(none)'}.`);
+      problems.push({ field: key, issue: 'unknown_key', accepted });
     }
   }
 

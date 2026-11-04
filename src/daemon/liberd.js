@@ -204,7 +204,7 @@ class LiberDaemon {
     // The daemon binds to loopback and every stateful endpoint still requires the
     // bearer token, so a wildcard origin does not weaken access control.
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     if (req.method === 'OPTIONS') {
       res.statusCode = 204;
@@ -260,6 +260,13 @@ class LiberDaemon {
         res.end(JSON.stringify({ success: true, cleared: true }));
       }
       else if (endpoint === '/turns') {
+        if (req.method === 'DELETE') {
+          const id = url.searchParams.get('agentId');
+          const targets = id ? [id] : journal.list().map(t => t.agentId).filter(Boolean);
+          for (const t of targets) journal.clear(t);
+          res.end(JSON.stringify({ success: true, cleared: targets.length }));
+          return;
+        }
         res.end(JSON.stringify({ success: true, turns: journal.list() }));
       }
       else if (endpoint === '/resume') {
@@ -275,7 +282,8 @@ class LiberDaemon {
           memory,
           llmManager,
           onEvent: () => {},
-          maxLoops: this.maxLoops
+          maxLoops: this.maxLoops,
+          waitForHitl: (aid, toolName, args) => this.waitForHitl(aid, `${toolName}: ${JSON.stringify(args)}`)
         }));
 
         if (result && result.response && this.traceEnabled) {
@@ -311,6 +319,13 @@ class LiberDaemon {
           return;
         }
         if (req.method === 'DELETE') {
+          // ?key=agent#session drops one session; without it the whole store goes.
+          const key = url.searchParams.get('key');
+          if (key) {
+            memory.clear(key);
+            res.end(JSON.stringify({ success: true, cleared: key }));
+            return;
+          }
           memory.clearAll();
           res.end(JSON.stringify({ success: true, cleared: true }));
           return;
@@ -616,7 +631,7 @@ class LiberDaemon {
           changed
         }));
       }
-      else if (endpoint === '/chat/stream') {
+      else if (endpoint === '/chat/stream' || endpoint === '/resume/stream') {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
@@ -639,7 +654,15 @@ class LiberDaemon {
 
         let body = '';
         for await (const chunk of req) body += chunk;
-        const { agentId, message } = JSON.parse(body || '{}');
+        const parsed = JSON.parse(body || '{}');
+        let agentId = parsed.agentId || Array.from(this.agents.keys())[0];
+        const { sessionId, message } = parsed;
+
+        // The window can hang up mid-turn (stop button, closed app). Stop spending
+        // tokens between iterations instead of finishing a reply nobody will see.
+        let clientGone = false;
+        res.on('close', () => { if (!res.writableEnded) clientGone = true; });
+        const shouldStop = () => clientGone;
 
         if (!this.agents.has(agentId)) {
           sendEvent('error', { error: `Agent ${agentId} not found` });
@@ -648,16 +671,43 @@ class LiberDaemon {
         }
 
         const agent = this.agents.get(agentId);
+
+        if (endpoint === '/resume/stream') {
+          try {
+            const result = await this.queue.run(agentId, () => liberEngine.resume(agentId, {
+              agentConfig: agent.config,
+              memory,
+              llmManager,
+              onEvent: sendEvent,
+              maxLoops: this.maxLoops,
+              shouldStop,
+              waitForHitl: (aid, toolName, args) => this.waitForHitl(aid, `${toolName}: ${JSON.stringify(args)}`)
+            }));
+            if (result && result.success === false) sendEvent('error', { error: result.error });
+            else if (this.traceEnabled && result && result.response) {
+              trace.appendTurn({ agentId, userMessage: '(resumed turn)', result, model: agent.config.engine?.model });
+            }
+          } catch (err) {
+            sendEvent('error', { error: err.message });
+          }
+          res.end();
+          return;
+        }
+
+        // A session is its own history key; omitting sessionId keeps the old behaviour.
+        const memoryKey = sessionId ? `${agentId}#${sessionId}` : agentId;
         try {
           const result = await this.queue.run(agentId, () => liberEngine.runTurn({
             agentId,
+            memoryKey,
             agentConfig: agent.config,
             userMessage: message,
             memory,
             llmManager,
             onEvent: sendEvent,
             waitForHitl: (aid, toolName, args) => this.waitForHitl(aid, `${toolName}: ${JSON.stringify(args)}`),
-            maxLoops: this.maxLoops
+            maxLoops: this.maxLoops,
+            shouldStop
           }));
           if (this.traceEnabled) {
             trace.appendTurn({ agentId, userMessage: message, result, model: agent.config.engine?.model });
@@ -670,18 +720,24 @@ class LiberDaemon {
       else if (endpoint === '/chat') {
         let body = '';
         for await (const chunk of req) body += chunk;
-        const { agentId, message } = JSON.parse(body || '{}');
+        const { agentId, sessionId, message } = JSON.parse(body || '{}');
 
         if (!this.agents.has(agentId)) throw new Error(`Agent ${agentId} not found`);
         const agent = this.agents.get(agentId);
+        const memoryKey = sessionId ? `${agentId}#${sessionId}` : agentId;
 
         const result = await this.queue.run(agentId, () => liberEngine.runTurn({
           agentId,
+          memoryKey,
           agentConfig: agent.config,
           userMessage: message,
           memory,
           llmManager,
-          waitForHitl: () => Promise.resolve(true),
+          // This endpoint answers with one JSON body, so there is no channel to
+          // ask a human: it fails closed. A command that needs approval is
+          // refused and the reply reports the denial. Use /chat/stream when the
+          // client can show a prompt and POST /hitl/verdict.
+          waitForHitl: () => Promise.resolve(false),
           maxLoops: this.maxLoops
         }));
 

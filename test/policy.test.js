@@ -85,9 +85,64 @@ test('allowlist terminal policy only runs listed prefixes', () => {
 
 test('terminal denylist wins in every mode', () => {
   const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
-  policy.configure({ terminal: { mode: 'prompt', allowlist: [], denylist: ['shutdown'] } });
+  policy.configure({ terminal: { mode: 'open', allowlist: [], denylist: ['shutdown'] } });
   assert.equal(evaluatePolicy('shutdown /s').denied, true);
   assert.equal(evaluatePolicy('dir').denied, false);
+});
+
+test('prompt mode fails closed instead of running everything', () => {
+  const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'prompt', allowlist: ['git status'], denylist: [] } });
+
+  const blocked = evaluatePolicy('dir');
+  assert.equal(blocked.denied, true, "'prompt' must not silently allow: there is no approval channel here");
+  assert.equal(blocked.needs_approval, true);
+  assert.match(blocked.reason, /prompt/);
+
+  assert.equal(evaluatePolicy('git status -s').denied, false, 'an allowlisted prefix still runs');
+});
+
+test('a chained operator is not covered by a prefix allowlist entry', () => {
+  const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'allowlist', allowlist: ['git status', 'node'], denylist: [] } });
+
+  assert.equal(evaluatePolicy('git status -s').denied, false);
+  assert.equal(evaluatePolicy('git status; rm -rf /').denied, true, 'semicolon escapes the prefix');
+  assert.equal(evaluatePolicy('git status && curl http://x').denied, true, 'double ampersand escapes the prefix');
+  assert.equal(evaluatePolicy('node -v | powershell -c whoami').denied, true, 'pipe escapes the prefix');
+});
+
+test('a denylisted word hiding after a chain operator is still caught', () => {
+  const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'open', allowlist: [], denylist: ['shutdown'] } });
+  assert.equal(evaluatePolicy('echo hi; shutdown /s').denied, true);
+});
+
+test('human approval bypasses the mode gate but never the denylist', () => {
+  const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'prompt', allowlist: [], denylist: ['shutdown'] } });
+
+  assert.equal(evaluatePolicy('dir').denied, true);
+  assert.equal(evaluatePolicy('dir', { approved: true }).denied, false, 'an approved command runs');
+  assert.equal(evaluatePolicy('shutdown /s', { approved: true }).denied, true, 'the denylist cannot be approved away');
+});
+
+test('runTerminal keeps the approval signal instead of dropping it', async () => {
+  const { runTerminal } = require('../src/daemon/core/tools/terminal-tool');
+  policy.configure({ terminal: { mode: 'prompt', allowlist: [], denylist: [] } });
+
+  const res = await runTerminal({ command: 'dir' });
+  assert.equal(res.policy_denied, true);
+  assert.equal(res.needs_approval, true, 'the consumer must be able to see a human could approve');
+  assert.ok(!('exit_code' in res), 'nothing was executed');
+});
+
+test('search_files refuses a file path instead of reporting zero matches', async () => {
+  const fileTools = require('../src/daemon/core/tools/file-tools');
+  fs.writeFileSync('search-me.js', 'const a = 1;\n');
+  const res = await fileTools.searchFiles({ pattern: 'const', path: 'search-me.js' });
+  assert.ok(res.error, 'an error, not an empty match list');
+  assert.match(res.error, /is a file, not a directory/);
 });
 
 test('read-only terminal policy allows read-only PowerShell cmdlets', () => {

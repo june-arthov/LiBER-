@@ -43,5 +43,10 @@ test('terminal policy reconfigures live via config-apply shape', () => {
   assert.equal(evaluatePolicy('npm test').denied, true);
 
   policy.configure({ terminal: { mode: 'prompt', allowlist: [], denylist: [] } });
-  assert.equal(evaluatePolicy('rm -rf node_modules').denied, false, 'prompt mode leaves HITL to humans');
+  const prompted = evaluatePolicy('rm -rf node_modules');
+  assert.equal(prompted.denied, true, 'prompt mode fails closed: this layer has no approval channel');
+  assert.equal(prompted.needs_approval, true, 'the escalation signal is part of the contract');
+
+  policy.configure({ terminal: { mode: 'prompt', allowlist: ['rm -rf node_modules'], denylist: [] } });
+  assert.equal(evaluatePolicy('rm -rf node_modules').denied, false, 'an allowlisted prefix still runs');
 });

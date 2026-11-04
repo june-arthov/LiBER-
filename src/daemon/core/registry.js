@@ -102,13 +102,26 @@ class ToolRegistry {
     // 6. todo_list
     this.register({
       name: 'todo_list',
-      description: 'Manage and track multi-step execution tasks and engineering goals.',
+      description: 'Maintain the visible plan for this turn. Prefer action "set" with the complete list (one item per step), then flip items to in_progress/completed as you work. The user sees this checklist live.',
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['add', 'complete', 'delete', 'list', 'clear'], description: 'Action to perform' },
+          action: { type: 'string', enum: ['set', 'add', 'update', 'complete', 'delete', 'list', 'clear'], description: 'set rewrites the whole plan; add/update/complete/delete act on one id' },
+          items: {
+            type: 'array',
+            description: 'Full plan for action "set": [{ "task": "...", "status": "pending|in_progress|completed" }]',
+            items: {
+              type: 'object',
+              properties: {
+                task: { type: 'string', description: 'Short imperative step' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }
+              },
+              required: ['task']
+            }
+          },
           task: { type: 'string', description: 'Task description (for action add)' },
-          id: { type: 'integer', description: 'Task ID (for action complete or delete)' }
+          id: { type: 'integer', description: 'Task ID (for update/complete/delete)' },
+          status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'New status (for action update)' }
         },
         required: ['action']
       },
@@ -222,7 +235,7 @@ class ToolRegistry {
     return { ...result, schema: { required: tool.parameters?.required || [], properties: Object.keys(tool.parameters?.properties || {}) } };
   }
 
-  async execute(name, args = {}) {
+  async execute(name, args = {}, meta = {}) {
     const tool = this.get(name);
     if (!tool) {
       return {
@@ -242,7 +255,7 @@ class ToolRegistry {
     }
 
     try {
-      return await tool.handler(args);
+      return await tool.handler(args, meta);
     } catch (err) {
       return { error: `Tool '${name}' failed: ${err.message}` };
     }

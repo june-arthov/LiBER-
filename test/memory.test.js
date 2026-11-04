@@ -51,3 +51,30 @@ test('a corrupt session file does not crash startup', () => {
   m.attach(file);
   assert.deepEqual(m.get('anything'), []);
 });
+
+test('a truncated store recovers the previous session from the backup', () => {
+  const file = path.join(tmp, '.liber', 'crashy.json');
+  const m1 = new MemoryManager(5);
+  m1.attach(file);
+  m1.add('agent-z', 'user', 'first');
+  m1.add('agent-z', 'assistant', 'second');   // this write keeps the previous file as .bak
+  fs.writeFileSync(file, '{"version":1,"sess'); // simulate a crash mid-write
+
+  const m2 = new MemoryManager(5);
+  m2.attach(file);
+  const restored = m2.get('agent-z');
+  assert.equal(restored.length, 1, 'the backup survives, so nothing is silently lost');
+  assert.equal(restored[0].content, 'first');
+});
+
+test('a completed save is atomic: no .tmp left behind, .bak is not in the way', () => {
+  const file = path.join(tmp, '.liber', 'atomic.json');
+  const m = new MemoryManager(5);
+  m.attach(file);
+  m.add('agent-w', 'user', 'hello');
+  assert.ok(fs.existsSync(file));
+  assert.ok(!fs.existsSync(`${file}.tmp`));
+  const m2 = new MemoryManager(5);
+  m2.attach(file);
+  assert.equal(m2.get('agent-w')[0].content, 'hello');
+});

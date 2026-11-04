@@ -127,18 +127,44 @@ class LiberEngine {
     }
   }
 
+  /**
+   * Short reply with no numbers, paths, versions or code identifiers: there is
+   * nothing for a second LLM pass to verify, and paying for one is what made a
+   * greeting feel slow.
+   */
+  isClaimFree(text) {
+    const s = String(text || '').trim();
+    if (!s) return false;
+    if (s.length > 140) return false;
+    return !/[0-9]|\/|\\|\.[a-z]{2,4}\b|[A-Za-z]{2,}@|[A-Z]{2,}/.test(s);
+  }
+
   extractThought(text) {
+    const blocks = this.extractThoughts(text);
+    return blocks.length ? blocks[0] : null;
+  }
+
+  /**
+   * Every reasoning block in one message, in order.
+   * A turn may think before each tool batch, so there is usually more than one.
+   */
+  extractThoughts(text) {
     const src = String(text);
-    const t = src.search(/\[THOUGHT:/i);
-    if (t >= 0) {
-      const block = this.balancedSlice(src, t);
-      if (block) {
-        const body = block.replace(/^\[THOUGHT:\s*/i, '').replace(/\]\s*$/, '').trim();
-        return body || null;
-      }
+    const blocks = [];
+    const re = /\[THOUGHT:/gi;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      const block = this.balancedSlice(src, m.index);
+      if (!block) break;
+      const body = block.replace(/^\[THOUGHT:\s*/i, '').replace(/\]\s*$/, '').trim();
+      if (body) blocks.push(body);
+      re.lastIndex = m.index + block.length;
     }
-    const m = src.match(/<thought>([\s\S]*?)<\/thought>/i);
-    return m ? m[1].trim() : null;
+    for (const t of src.matchAll(/<thought>([\s\S]*?)<\/thought>/gi)) {
+      const body = t[1].trim();
+      if (body) blocks.push(body);
+    }
+    return blocks;
   }
 
   /**
@@ -147,7 +173,7 @@ class LiberEngine {
    */
   extractReasoning(text) {
     const src = String(text);
-    const tagged = this.extractThought(src);
+    const tagged = this.extractThoughts(src);
 
     const marker = src.search(/\[(?:TOOL|EXEC|READ|WRITE|FINAL):/i);
     let preamble = '';
@@ -157,8 +183,9 @@ class LiberEngine {
         .trim();
     }
 
-    if (tagged) {
-      return { content: preamble ? `${tagged}\n\n${preamble}` : tagged, kind: 'tagged' };
+    if (tagged.length) {
+      const joined = tagged.join('\n\n');
+      return { content: preamble ? `${joined}\n\n${preamble}` : joined, kind: 'tagged' };
     }
     if (preamble.length >= 24) {
       return { content: preamble, kind: 'preamble' };
@@ -233,7 +260,7 @@ class LiberEngine {
   /**
    * Resume an interrupted turn from the journal.
    */
-  async resume(agentId, { agentConfig, memory, llmManager, onEvent = () => {}, maxLoops = 12 }) {
+  async resume(agentId, { agentConfig, memory, llmManager, onEvent = () => {}, maxLoops = 12, shouldStop = null, waitForHitl = null }) {
     const state = journal.load(agentId);
     if (!state) {
       return { success: false, error: `No interrupted turn for '${agentId}'.` };
@@ -246,7 +273,11 @@ class LiberEngine {
       llmManager,
       onEvent,
       maxLoops,
-      resumeState: state
+      resumeState: state,
+      shouldStop,
+      // Must be forwarded: a resumed turn can hit the same sensitive tools, and
+      // the runTurn default (deny) would otherwise block every one of them.
+      ...(typeof waitForHitl === 'function' ? { waitForHitl } : {})
     });
   }
 
@@ -354,18 +385,31 @@ class LiberEngine {
 
   async runTurn({
     agentId,
+    memoryKey = null,
     agentConfig,
     userMessage,
     memory,
     llmManager,
     onEvent = () => {},
-    waitForHitl = async () => true,
+    // Fail closed: a caller that forgets to supply an approval channel must not
+    // silently authorize sensitive tools.
+    waitForHitl = async () => false,
     maxLoops = 12,
     depth = 0,
     allowedTools = null,
-    resumeState = null
+    resumeState = null,
+    shouldStop = null
   }) {
     const resumed = !!resumeState;
+    // The client can hang up mid-turn (stop button / closed window). Checked
+    // between iterations so we stop spending tokens as soon as it does.
+    const stopRequested = () => {
+      try { return typeof shouldStop === 'function' && shouldStop() === true; } catch { return false; }
+    };
+    let stopped = false;
+    // Session history lives under its own key so a new session starts empty;
+    // tracing, evidence and the breaker stay keyed to the real agent.
+    const memKey = memoryKey || agentId;
     const cfg = { ...DEFAULT_GROUNDING, ...(agentConfig.grounding || {}) };
     const ledger = resumed ? EvidenceLedger.fromJSON(resumeState.ledger) : new EvidenceLedger(agentId);
     const skillCtx = skills.buildContext(String(userMessage || ''), cfg.doctrine_budget_chars);
@@ -374,7 +418,7 @@ class LiberEngine {
     circuitBreaker.reset(agentId);
 
     if (!resumed) {
-      memory.add(agentId, 'user', userMessage);
+      memory.add(memKey, 'user', userMessage);
     }
     logger.info(agentId, 'USER_MESSAGE_START', { userMessage, resumed });
 
@@ -382,7 +426,7 @@ class LiberEngine {
     if (resumed && Array.isArray(resumeState.messages) && resumeState.messages.length) {
       messages = resumeState.messages.map(m => ({ ...m }));
     } else {
-      const history = memory.get(agentId).map(m => ({ role: m.role, content: m.content }));
+      const history = memory.get(memKey).map(m => ({ role: m.role, content: m.content }));
       messages = [{ role: 'system', content: '' }, ...history];
     }
 
@@ -397,6 +441,8 @@ class LiberEngine {
     let streamedAny = false;
     let nativeTools = agentConfig.engine?.native_tools === true;
     let subSeq = 0;
+    let finalAsked = false; // one protocol nudge per turn, never more
+    let hurryAsked = false; // one "converge now" nudge per turn
 
     const persistTurn = () => {
       if (cfg.journal === false) return;
@@ -422,6 +468,13 @@ class LiberEngine {
     while (iteration < maxLoops) {
       if (circuitBreaker.isBroken(agentId)) break;
 
+      if (stopRequested()) {
+        stopped = true;
+        onEvent('stopped', { iteration, receipts: ledger.entries.length });
+        logger.warn(agentId, 'TURN_STOPPED', { iteration, receipts: ledger.entries.length });
+        break;
+      }
+
       const budgetState = budget.check(agentConfig.limits || {}, agentConfig.engine || {});
       if (!budgetState.allowed) {
         finalResponse = `${budgetState.reason} No further model calls were made this turn. Receipts: ${
@@ -430,6 +483,20 @@ class LiberEngine {
         onEvent('budget_blocked', budgetState);
         logger.error(agentId, 'BUDGET_BLOCKED', budgetState);
         break;
+      }
+
+      // Converge instead of spending the last iterations exploring: with two
+      // iterations left the model is told to answer from what it already has.
+      if (!hurryAsked && iteration >= maxLoops - 2 && ledger.entries.length && !finalResponse) {
+        hurryAsked = true;
+        const hurry = [
+          `You have at most ${maxLoops - iteration} iteration(s) left.`,
+          'Stop exploring. Answer the user now as one [FINAL: ...] block using the receipts you already hold;',
+          'cite each factual claim or write UNVERIFIED: <claim>.'
+        ].join(' ');
+        messages.push({ role: 'user', content: hurry });
+        memory.add(memKey, 'user', hurry);
+        onEvent('converging', { iteration, maxLoops, receipts: ledger.entries.length });
       }
 
       messages = this.compressContext(messages, agentConfig.engine?.context_budget || 14000);
@@ -458,6 +525,9 @@ class LiberEngine {
       const llmStart = Date.now();
       let response = '';
       let nativeCalls = null;
+      // Provider-native chain of thought (reasoning_content / thinking_delta).
+      let reasoningStream = '';
+      let reasoningLive = false;
 
       if (nativeTools) {
         try {
@@ -482,11 +552,23 @@ class LiberEngine {
             }
             response += delta;
             onEvent('draft', { delta });
+          }, {
+            // Live reasoning: stream it to the client exactly as the model emits it.
+            onReasoning: (text) => {
+              if (!text) return;
+              if (!reasoningLive) {
+                reasoningLive = true;
+                onEvent('reasoning_start', { model: agentConfig.engine?.model });
+              }
+              reasoningStream += text;
+              onEvent('reasoning', { delta: text });
+            }
           });
           if (started) {
             streamedAny = true;
             onEvent('draft_end', { chars: response.length });
           }
+          if (reasoningLive) onEvent('reasoning_end', { chars: reasoningStream.length });
         } catch (err) {
           logger.error(agentId, 'LLM_STREAM_ERROR', { error: err.message, chars: response.length });
           onEvent('draft_end', { chars: response.length, failed: true });
@@ -520,14 +602,17 @@ class LiberEngine {
       });
 
       let reasoning = null;
-      if (nativeCalls && nativeCalls.length) {
+      if (reasoningStream.trim()) {
+        // Already streamed to the client as its own block — do not repeat it as a step.
+        reasoning = { content: reasoningStream.trim(), kind: 'reasoning' };
+      } else if (nativeCalls && nativeCalls.length) {
         if (response.trim()) reasoning = { content: response.trim(), kind: 'native' };
       } else {
         reasoning = this.extractReasoning(response);
       }
       if (reasoning) {
         trace.push({ type: 'thought', content: reasoning.content, kind: reasoning.kind });
-        onEvent('thought', { content: reasoning.content, kind: reasoning.kind });
+        if (!reasoningLive) onEvent('thought', { content: reasoning.content, kind: reasoning.kind });
       }
 
       const explicitFinal = this.extractFinal(response);
@@ -545,11 +630,31 @@ class LiberEngine {
             'You returned an empty response with no tool calls. That cannot be delivered.',
             'Produce your answer as [FINAL: ...] citing receipts, or keep working with tools.'
           ].join(' ');
-          memory.add(agentId, 'user', nudge);
+          memory.add(memKey, 'user', nudge);
           messages.push({ role: 'user', content: nudge });
           trace.push({ type: 'loop_guard', tool: 'empty-answer' });
           onEvent('loop_guard', { tool: 'empty-answer' });
           circuitBreaker.increment(agentId);
+          iteration++;
+          persistTurn();
+          continue;
+        }
+
+        // The protocol answer is [FINAL: ...]. Without it the model's text is
+        // process narration ("the ledger is empty", "the audit rejects…") and must
+        // never be delivered as the reply. Ask once for a real answer.
+        if (explicitFinal === null && !finalAsked) {
+          finalAsked = true;
+          const nudge = [
+            'Your reply contained no [FINAL: ...] block, so the user would only see your internal process narration.',
+            'Never describe the evidence ledger, the audit, receipt ids, [E#] choices or your formatting decisions in the answer.',
+            'Write the actual reply now: one [FINAL: ...] block, short, in the user’s language.'
+          ].join(' ');
+          memory.add(memKey, 'user', nudge);
+          messages.push({ role: 'user', content: nudge });
+          trace.push({ type: 'loop_guard', tool: 'missing-final' });
+          onEvent('loop_guard', { tool: 'missing-final' });
+          logger.warn(agentId, 'MISSING_FINAL', { chars: String(response).length });
           iteration++;
           persistTurn();
           continue;
@@ -563,7 +668,9 @@ class LiberEngine {
           : { passed: true, status: 'DISABLED', violations: [], claims_checked: 0, receipts: ledger.entries.length, citations: [] };
 
         // Second pass: does a receipt actually entail the claim, not merely exist?
-        if (cfg.enabled && cfg.semantic_verifier && verdict.passed && ledger.entries.length) {
+        // It costs a whole extra model call, so it is skipped for replies that make
+        // no auditable claim at all ("Hi.", "thanks", "what did you just say").
+        if (cfg.enabled && cfg.semantic_verifier && verdict.passed && ledger.entries.length && !this.isClaimFree(candidate)) {
           try {
             const sem = await verifier.verify({
               candidate,
@@ -620,8 +727,8 @@ class LiberEngine {
           });
 
           const repairMsg = grounding.buildRepairMessage(verdict, ledger, repairs, cfg.max_repairs);
-          memory.add(agentId, 'assistant', response);
-          memory.add(agentId, 'user', repairMsg);
+          memory.add(memKey, 'assistant', response);
+          memory.add(memKey, 'user', repairMsg);
           messages.push({ role: 'assistant', content: response });
           // Repair prompts are directives the model must act on. Some providers (e.g. kimi-k2.7)
           // silently ignore mid-conversation system messages, so deliver them as user turns.
@@ -664,7 +771,7 @@ class LiberEngine {
           }))
         : textToolCalls;
 
-      memory.add(agentId, 'assistant', response || '[native tool calls]');
+      memory.add(memKey, 'assistant', response || '[native tool calls]');
       if (hasNativeCalls) {
         messages.push({ role: 'assistant', content: response || null, tool_calls: nativeCalls });
       } else {
@@ -691,7 +798,7 @@ class LiberEngine {
 
           trace.push({ type: 'loop_guard', tool: call.name, receipt: prior ? prior.id : null });
           onEvent('loop_guard', { tool: call.name, receipt: prior ? prior.id : null, repetitions });
-          memory.add(agentId, 'user', nudge);
+          memory.add(memKey, 'user', nudge);
           if (call.native && call.id) messages.push({ role: 'tool', tool_call_id: call.id, content: nudge });
           else messages.push({ role: 'user', content: nudge });
           continue;
@@ -722,7 +829,7 @@ class LiberEngine {
         const toolStart = Date.now();
         let result;
         if (denied) {
-          result = { error: `DENIED by the human operator. Tool '${call.name}' did not execute.` };
+          result = { error: `DENIED: approval was not granted. Tool '${call.name}' did not execute.` };
         } else if (allowedTools && !allowedTools.includes(call.name)) {
           result = { error: `Tool '${call.name}' is not available in this context (subagents are read/verify workers).` };
         } else if (call.name === 'task' || call.name === 'tasks') {
@@ -738,9 +845,30 @@ class LiberEngine {
         } else {
           result = await registry.execute(call.name, call.args);
         }
+
+        // A tool can refuse for policy reasons and report that a human may
+        // approve (policy.terminal.mode 'prompt'). Ask, then re-dispatch once.
+        if (result && result.needs_approval === true && !denied) {
+          onEvent('hitl_intercept', {
+            tool: call.name,
+            target: call.args.command || call.args.path || JSON.stringify(call.args),
+            reason: result.error || 'Policy requires human approval.'
+          });
+          const approved = await waitForHitl(agentId, call.name, call.args);
+          if (approved) {
+            onEvent('hitl_approved', { tool: call.name, retried: true });
+            result = await registry.execute(call.name, call.args, { approved: true });
+          } else {
+            result = { error: `DENIED: approval was not granted. Tool '${call.name}' did not execute.`, policy_denied: true };
+          }
+        }
         const durationMs = Date.now() - toolStart;
 
         const ev = ledger.record(call.name, call.args, result, { denied });
+        // The plan is UI state, not evidence: push a snapshot as it changes.
+        if (call.name === 'todo_list' && Array.isArray(result?.tasks)) {
+          onEvent('todo', { tasks: result.tasks.map(t => ({ ...t })) });
+        }
         const outStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
         const injectionWarning = injection.scan(outStr) ? `\n${injection.WARNING}\n` : '';
         if (injectionWarning) {
@@ -751,6 +879,7 @@ class LiberEngine {
         onEvent('observation', {
           evidence: ev.id,
           tool: call.name,
+          target: call.args.path || call.args.command || call.args.pattern || call.args.url || '',
           ok: ev.ok,
           output: outStr,
           exit_code: typeof result?.exit_code === 'number' ? result.exit_code : (ev.ok ? 0 : 1),
@@ -761,7 +890,7 @@ class LiberEngine {
         const observation = `OBSERVATION [${ev.id}] ${call.name} ${ev.ok ? 'OK' : 'FAILED'}${ev.exit_code !== null ? ` (exit ${ev.exit_code})` : ''}:${injectionWarning}${outStr}`;
         // Observations are tool results: deliver as user turns, never mid-conversation system
         // messages (several providers drop those silently and re-issue the same call forever).
-        memory.add(agentId, 'user', observation);
+        memory.add(memKey, 'user', observation);
         if (call.native && call.id) messages.push({ role: 'tool', tool_call_id: call.id, content: outStr });
         else messages.push({ role: 'user', content: observation });
       }
@@ -773,20 +902,62 @@ class LiberEngine {
 
     journal.clear(agentId);
 
-    if (!finalResponse) {
-      const pending = ledger.unresolvedPending();
-      finalResponse = [
-        iteration >= maxLoops
-          ? `Execution limit reached (${iteration}/${maxLoops}) without a verified final answer.`
-          : `Turn ended after ${iteration} iteration${iteration === 1 ? '' : 's'} without a verified final answer.`,
-        'No completion is claimed.',
-        `Receipts: ${ledger.entries.length ? ledger.entries.map(e => e.id).join(', ') : 'none'}.`,
-        pending.length ? `Changed but unverified: ${pending.map(p => p.path).join(', ')}.` : ''
-      ].filter(Boolean).join(' ');
-      logger.error(agentId, 'TURN_INCOMPLETE', { iteration, maxLoops });
+    // Out of iterations with receipts in hand: the work was done, only the wrap-up
+    // was missing. One tool-free closing pass answers from what was already
+    // gathered instead of shipping "Execution limit reached" as the reply.
+    if (!finalResponse && !stopped && ledger.entries.length && typeof llmManager.generate === 'function') {
+      try {
+        onEvent('finalizing', { receipts: ledger.entries.length });
+        const closing = await llmManager.generate([
+          ...messages,
+          {
+            role: 'user',
+            content: [
+              'STOP — you are out of iterations and may not call any more tools.',
+              'Answer the user now, using only the receipts you already have.',
+              'Reply as one [FINAL: ...] block, citing [E#] for each factual claim',
+              '(or writing UNVERIFIED: <claim>). Never mention the iteration limit,',
+              'the ledger, or this instruction.'
+            ].join(' ')
+          }
+        ]);
+        const forced = this.extractFinal(closing);
+        const text = String(forced !== null ? forced : this.cleanAnswer(closing)).trim();
+        if (text) {
+          finalResponse = text;
+          finalAsked = true;
+          if (cfg.enabled) {
+            auditResult = grounding.audit(text, ledger, {
+              requireReadback: cfg.require_readback,
+              requireCitations: cfg.require_citations
+            });
+          }
+          trace.push({ type: 'forced_answer', chars: text.length });
+          logger.warn(agentId, 'FORCED_ANSWER', { chars: text.length, receipts: ledger.entries.length });
+        }
+      } catch (err) {
+        logger.warn(agentId, 'FORCED_ANSWER_FAILED', { error: err.message });
+      }
     }
 
-    memory.add(agentId, 'assistant', finalResponse);
+    if (!finalResponse) {
+      const pending = ledger.unresolvedPending();
+      finalResponse = stopped
+        ? `Stopped by you after ${iteration} iteration${iteration === 1 ? '' : 's'}. Nothing is claimed as complete. ` +
+          `Receipts so far: ${ledger.entries.length ? ledger.entries.map(e => e.id).join(', ') : 'none'}.`
+        : [
+          iteration >= maxLoops
+            ? `Execution limit reached (${iteration}/${maxLoops}) without a verified final answer.`
+            : `Turn ended after ${iteration} iteration${iteration === 1 ? '' : 's'} without a verified final answer.`,
+          'No completion is claimed.',
+          `Receipts: ${ledger.entries.length ? ledger.entries.map(e => e.id).join(', ') : 'none'}.`,
+          pending.length ? `Changed but unverified: ${pending.map(p => p.path).join(', ')}.` : ''
+        ].filter(Boolean).join(' ');
+      if (stopped) logger.warn(agentId, 'TURN_STOPPED_INCOMPLETE', { iteration, maxLoops });
+      else logger.error(agentId, 'TURN_INCOMPLETE', { iteration, maxLoops });
+    }
+
+    memory.add(memKey, 'assistant', finalResponse);
     agentConfig.metrics = agentConfig.metrics || { requests: 0 };
     agentConfig.metrics.requests++;
     logger.info(agentId, 'TURN_COMPLETE', {
@@ -809,6 +980,7 @@ class LiberEngine {
     const resultPayload = {
       success: true,
       response: finalResponse,
+      stopped,
       grounded: auditResult ? auditResult.passed : null,
       usage: usageReport,
       streamed: streamedAny,

@@ -100,6 +100,9 @@ test('write without read-back is caught; read-back clears it', async () => {
     memory,
     llmManager: llm,
     onEvent: () => {},
+    // write_file is sensitive: production supplies this through the daemon's
+    // HITL channel, and the engine default now denies
+    waitForHitl: async () => true,
     maxLoops: 8
   });
 
@@ -160,6 +163,65 @@ test('argument validation blocks execution and feeds the error back', async () =
   assert.equal(first.tool, 'read_file');
 });
 
+test('a sensitive tool with no approval channel is denied, not auto-approved', async () => {
+  const llm = scripted([
+    '[TOOL: write_file({"path": "nope.txt", "content": "x"})]',
+    '[FINAL: nothing was written.]'
+  ]);
+  const events = [];
+  await engine.runTurn({
+    agentId: 't-nohitl',
+    agentConfig: cfg(),
+    userMessage: 'write a file',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 4
+    // no waitForHitl on purpose: the default must fail closed
+  });
+
+  const denied = events.find(x => x.e === 'observation' && /DENIED/.test(String(x.d.output)));
+  assert.ok(denied, 'the write is refused, not silently executed');
+  assert.equal(fs.existsSync('nope.txt'), false, 'no file was created');
+});
+
+test('asks a human when a tool reports needs_approval, then re-dispatches', async () => {
+  const registry = require('../src/daemon/core/registry');
+  const real = registry.execute;
+  let calls = 0;
+  const metas = [];
+  registry.execute = async (name, args, meta) => {
+    calls++;
+    metas.push(meta || {});
+    if (calls === 1) return { error: 'needs approval', policy_denied: true, needs_approval: true };
+    return { ok: true, ran: true };
+  };
+
+  const events = [];
+  let asked = 0;
+  try {
+    const llm = scripted(['[TOOL: terminal({"command": "dir"})]', '[FINAL: done]']);
+    await engine.runTurn({
+      agentId: 't-approval',
+      agentConfig: cfg(),
+      userMessage: 'list files',
+      memory,
+      llmManager: llm,
+      onEvent: (e, d) => events.push({ e, d }),
+      waitForHitl: async () => { asked++; return true; },
+      maxLoops: 4
+    });
+  } finally {
+    registry.execute = real;
+  }
+
+  assert.equal(asked, 1, 'the human is asked exactly once');
+  assert.equal(calls, 2, 'the tool is re-dispatched after approval');
+  assert.equal(metas[1].approved, true, 'the retry carries the approval');
+  assert.ok(events.some(x => x.e === 'hitl_intercept'));
+  assert.ok(events.some(x => x.e === 'hitl_approved' && x.d.retried === true));
+});
+
 test('loop exhaustion reports honestly instead of claiming completion', async () => {
   const llm = scripted(['[TOOL: read_file({"path": "package.json"})]']);
   const res = await engine.runTurn({
@@ -173,6 +235,56 @@ test('loop exhaustion reports honestly instead of claiming completion', async ()
   });
   assert.match(res.response, /Execution limit reached/);
   assert.match(res.response, /No completion is claimed/);
+});
+
+test('a stopped turn ends honestly and skips the closing pass', async () => {
+  const llm = scripted([
+    '[TOOL: read_file({"path": "package.json"})]',
+    '[FINAL: must never be delivered]'
+  ]);
+  let stop = false;
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-stop',
+    agentConfig: cfg(),
+    userMessage: 'keep going',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => { events.push({ e, d }); if (e === 'observation') stop = true; },
+    maxLoops: 6,
+    shouldStop: () => stop
+  });
+
+  assert.ok(events.some(x => x.e === 'stopped'), 'stop is announced');
+  assert.equal(res.stopped, true);
+  assert.match(res.response, /Stopped by you/);
+  assert.ok(!/must never be delivered/.test(res.response), 'no answer is fabricated after a stop');
+});
+
+test('answers from the receipts it already has when iterations run out', async () => {
+  const llm = {
+    async generate(messages) {
+      const last = messages[messages.length - 1];
+      if (last.role === 'user' && /^STOP/.test(String(last.content))) {
+        return '[FINAL: package.json declares version 0.1.0 [E1].]';
+      }
+      return '[TOOL: read_file({"path": "package.json"})]';
+    }
+  };
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-forced',
+    agentConfig: cfg(),
+    userMessage: 'which version?',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 3
+  });
+
+  assert.ok(events.some(x => x.e === 'finalizing'), 'closing pass announced');
+  assert.match(res.response, /version 0\.1\.0/, 'the collected receipts are used');
+  assert.ok(!/Execution limit reached/.test(res.response), 'no dead-end notice');
 });
 
 test('an empty model answer is nudged and retried, not reported as limit reached', async () => {
@@ -297,6 +409,21 @@ test('a thought containing citation brackets is not truncated', () => {
   assert.match(text, /\[E1\] so it matches/);
 });
 
+test('the system prompt pins the citation contract', () => {
+  const soul = require('../src/daemon/core/liber-soul');
+  const p = soul.buildSystemPrompt({ name: 'fixture' }, 'TOOLS', {
+    ledger: null,
+    nativeTools: false,
+    skillContext: ''
+  });
+  // Each rule exists because the model broke it in a real run.
+  assert.match(p, /BARE \[E1\]/, 'citations must be bare ids');
+  assert.match(p, /NEVER write a line range/, 'line ranges are a citation error');
+  assert.match(p, /VERBATIM/, 'quotes must come from a cited receipt');
+  assert.match(p, /EXPIRE with the turn/, 'receipts are per-turn');
+  assert.match(p, /BEFORE EVERY \[FINAL:\]/, 'pre-send checklist');
+});
+
 test('streams drafts and still audits the final answer', async () => {
   let call = 0;
   const llm = {
@@ -331,6 +458,120 @@ test('streams drafts and still audits the final answer', async () => {
   assert.ok(events.filter(x => x.e === 'draft').length > 0);
   assert.ok(events.some(x => x.e === 'draft_end' && !x.d.failed));
   assert.equal(res.grounding.status, 'PASS', JSON.stringify(res.grounding.violations));
+});
+
+test('streams provider reasoning as its own block instead of a duplicate step', async () => {
+  const llm = {
+    async stream(messages, onChunk, options = {}) {
+      // what a DeepSeek/OpenAI-compatible reasoner emits before the answer
+      options.onReasoning?.('I should check the file. ');
+      options.onReasoning?.('Then answer.');
+      onChunk('[FINAL: the workspace is clean.]');
+      return '[FINAL: the workspace is clean.]';
+    },
+    async generate() {
+      throw new Error('generate must not run when streaming succeeds');
+    },
+    getLastUsage() {
+      return null;
+    }
+  };
+
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-reasoning',
+    agentConfig: {
+      ...cfg(),
+      engine: { model: 'fixture', stream: true },
+      grounding: { ...cfg().grounding, enabled: false }
+    },
+    userMessage: 'look at the workspace',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 3
+  });
+
+  assert.equal(events.filter(x => x.e === 'reasoning_start').length, 1);
+  assert.deepEqual(
+    events.filter(x => x.e === 'reasoning').map(x => x.d.delta),
+    ['I should check the file. ', 'Then answer.']
+  );
+  assert.equal(events.filter(x => x.e === 'reasoning_end').length, 1);
+  assert.equal(events.filter(x => x.e === 'thought').length, 0, 'reasoning already streamed; no duplicate step');
+  assert.match(res.response, /workspace is clean/);
+});
+
+test('never delivers process narration when the model forgets [FINAL]', async () => {
+  const llm = scripted([
+    '[THOUGHT: The ledger is empty this turn.] The audit rejects numerals that do not appear in the receipt.',
+    '[FINAL: Hello. What should we build?]'
+  ]);
+  const events = [];
+  const res = await engine.runTurn({
+    agentId: 't-narration',
+    agentConfig: { ...cfg(), grounding: { ...cfg().grounding, enabled: false } },
+    userMessage: 'hello liber',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 4
+  });
+
+  assert.ok(events.some(x => x.e === 'loop_guard' && x.d.tool === 'missing-final'), 'one protocol nudge');
+  assert.equal(llm.calls.length, 2, 'nudged exactly once');
+  assert.match(res.response, /Hello/);
+  assert.ok(!/audit|ledger|receipt/i.test(res.response), 'the machinery never reaches the answer');
+});
+
+test('keeps every thinking block of a multi-step turn, in order', async () => {
+  const llm = scripted([
+    '[THOUGHT: The manifest is the fastest receipt for the version claim. Reading it first avoids guessing.] [TOOL: read_file({"path": "package.json"})]',
+    '[THOUGHT: The receipt says 0.1.0, which settles the question. I can answer with that citation now.] [FINAL: package.json declares version 0.1.0 [E1].]'
+  ]);
+  const events = [];
+  await engine.runTurn({
+    agentId: 't-think',
+    agentConfig: cfg(),
+    userMessage: 'which version?',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 5
+  });
+
+  const thoughts = events.filter(x => x.e === 'thought').map(x => x.d.content);
+  assert.equal(thoughts.length, 2, 'one thinking block per model step');
+  assert.match(thoughts[0], /fastest receipt/);
+  assert.match(thoughts[1], /settles the question/);
+  assert.ok(!/\[THOUGHT:/.test(thoughts[0]), 'the tag itself is stripped');
+});
+
+test('pushes the todo plan to the client as it changes', async () => {
+  const llm = scripted([
+    '[TOOL: todo_list({"action":"set","items":[{"task":"read the composer"},{"task":"apply spacing","status":"in_progress"}]})]',
+    '[TOOL: todo_list({"action":"complete","id":2})]',
+    '[FINAL: plan recorded.]'
+  ]);
+  const events = [];
+  await engine.runTurn({
+    agentId: 't-todo',
+    agentConfig: {
+      ...cfg(),
+      grounding: { ...cfg().grounding, enabled: false }
+    },
+    userMessage: 'plan the work',
+    memory,
+    llmManager: llm,
+    onEvent: (e, d) => events.push({ e, d }),
+    maxLoops: 6
+  });
+
+  const plans = events.filter(x => x.e === 'todo');
+  assert.equal(plans.length, 2, 'one todo event per todo_list call');
+  assert.deepEqual(plans[0].d.tasks.map(t => t.status), ['pending', 'in_progress']);
+  assert.deepEqual(plans[1].d.tasks.map(t => t.status), ['pending', 'completed']);
+  assert.equal(plans[1].d.tasks[1].id, 2, 'ids stay stable across a rewrite');
 });
 
 test('falls back to a full completion when streaming fails immediately', async () => {
