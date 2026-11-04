@@ -2,7 +2,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const MEMORY_FILE = path.resolve(process.cwd(), '.liber_memory.json');
+// LIBER_MEMORY_FILE keeps tests (and side-by-side installs) off the live store.
+const MEMORY_FILE = process.env.LIBER_MEMORY_FILE || path.resolve(process.cwd(), '.liber_memory.json');
 
 class MemoryStore {
   constructor() {
@@ -26,6 +27,51 @@ class MemoryStore {
     } catch (err) {
       console.error(`[MemoryStore] Failed to save: ${err.message}`);
     }
+  }
+
+  /** Every entry, newest first — for injection and the settings page. */
+  allEntries() {
+    return Object.entries(this.data)
+      .map(([key, v]) => ({
+        key,
+        value: String(v && v.value !== undefined ? v.value : ''),
+        updated_at: (v && v.updated_at) || null
+      }))
+      .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  }
+
+  /**
+   * Compact text for the system prompt. This is the whole point of the store:
+   * a new session should know the standing facts without having to ask for
+   * them. Budgeted, because memory that crowds out the task is worse than none.
+   */
+  block(maxChars = 1400) {
+    const entries = this.allEntries();
+    if (!entries.length) return '';
+    const lines = [];
+    let used = 0;
+    for (const e of entries) {
+      const value = e.value.replace(/\s+/g, ' ').trim();
+      if (!value) continue;
+      const line = `- ${e.key}: ${value.length > 220 ? value.slice(0, 217) + '…' : value}`;
+      if (used + line.length + 1 > maxChars) break;
+      lines.push(line);
+      used += line.length + 1;
+    }
+    return lines.join('\n');
+  }
+
+  /** Write facts that are missing; never overwrite what the user already set. */
+  seed(facts = {}) {
+    let added = 0;
+    for (const [key, value] of Object.entries(facts)) {
+      if (key in this.data) continue;
+      if (value === undefined || value === null || String(value).trim() === '') continue;
+      this.data[key] = { value: String(value), updated_at: new Date().toISOString() };
+      added++;
+    }
+    if (added) this._save();
+    return added;
   }
 
   execute({ action = "get", key = null, value = null }) {
@@ -73,5 +119,9 @@ class MemoryStore {
 
 const store = new MemoryStore();
 module.exports = {
-  manageMemory: (args) => store.execute(args)
+  manageMemory: (args) => store.execute(args),
+  memoryBlock: (maxChars) => store.block(maxChars),
+  memoryEntries: () => store.allEntries(),
+  memorySeed: (facts) => store.seed(facts),
+  memoryStore: store
 };

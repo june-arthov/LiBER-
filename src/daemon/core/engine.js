@@ -413,6 +413,12 @@ class LiberEngine {
     const cfg = { ...DEFAULT_GROUNDING, ...(agentConfig.grounding || {}) };
     const ledger = resumed ? EvidenceLedger.fromJSON(resumeState.ledger) : new EvidenceLedger(agentId);
     const skillCtx = skills.buildContext(String(userMessage || ''), cfg.doctrine_budget_chars);
+    // Standing facts are injected every turn, not fetched on demand: a new
+    // session should open already knowing the user and this workspace.
+    let memoryBlockText = '';
+    try {
+      memoryBlockText = require('./tools/memory-tool').memoryBlock(1400) || '';
+    } catch { /* memory is optional */ }
 
     circuitBreaker.configureLimit(agentId, maxLoops);
     circuitBreaker.reset(agentId);
@@ -508,6 +514,7 @@ class LiberEngine {
       const systemContent = buildSystemPrompt(agentConfig, registry.getToolDescription(), {
         ledger,
         skillContext: skillCtx.text,
+        memoryBlock: memoryBlockText,
         nativeTools
       });
       if (messages[0] && messages[0].role === 'system') messages[0] = { role: 'system', content: systemContent };
@@ -603,6 +610,7 @@ class LiberEngine {
         usageTotals.total_tokens += Number(usage.total_tokens || 0);
         budget.record(usage, agentConfig.engine || {});
       }
+      onEvent('memory', { chars: memoryBlockText.length });
       onEvent('telemetry', {
         // Measured, not invented: estimated output tokens / real wall time.
         tok_speed: parseFloat(((String(response).length / 4) / (llmMs / 1000)).toFixed(1)),

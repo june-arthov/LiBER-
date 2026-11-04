@@ -90,6 +90,16 @@ function buildSystemPrompt(agentConfig, toolDescriptions, options = {}) {
     ? `\n=== SKILLS (procedural knowledge — apply silently, do not quote back) ===\n${skillContext}\n`
     : '';
 
+  // Persistent memory: standing facts about this machine and this user. Without
+  // this, every new session starts as a stranger and re-learns the same things.
+  const memoryText = String(options.memoryBlock || '').trim();
+  const memoryBlock = memoryText
+    ? `\n=== WHAT YOU ALREADY KNOW (persistent memory — established context) ===\n${memoryText}\n`
+      + 'These are facts stored earlier by the user or by you. Use them directly: do not re-verify them,\n'
+      + 'do not cite them as receipts, and do not read them back to the user unless asked.\n'
+      + 'If a tool receipt contradicts one, the receipt wins — state the correction once.\n'
+    : '';
+
   return `
 ${LIBER_SOUL_DIRECTIVE}
 
@@ -136,6 +146,7 @@ RULES OF ENGAGEMENT:
 - Keep the answer short: findings and the next action. A report is not finished when everything is
   said, it is finished when the user can act.
 ${PRE_SEND_CHECK}
+${memoryBlock}
 ${skillBlock}`.trim();
 }
 

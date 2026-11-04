@@ -3010,21 +3010,84 @@ async function renderPanel(){
 
   /* ── MEMORY ────────────────────────────── */
   if(cat==='memory'){
-    p.innerHTML=`<h3>Memory &amp; Context</h3><div class="pd">Conversation window, persistence and compaction.</div>
+    p.innerHTML=`<h3>Memory &amp; Context</h3><div class="pd">Standing facts are injected into every turn, so a new session already knows you and this workspace.</div>
+      <div class="dsec">What the agent remembers</div>
+      <div id="mm-list" class="pmeta" style="padding:0 0 8px">reading…</div>
+      <div class="f"><label>New memory</label><div class="c">
+        <input type="text" id="mm-key" placeholder="key, e.g. pref.language">
+        <input type="text" id="mm-val" placeholder="value, e.g. Indonesian, technical terms in English" style="margin-top:6px">
+        <div class="hint">Injected on every turn (budget 1400 chars, newest first). Delete anything you do not want in the prompt.</div>
+      </div></div>
+      <div class="brow"><button class="btn primary" id="mm-add">Save memory</button></div>
+      <div class="dsec">Conversation window</div>
       <div class="f"><label>Window size</label><div class="c"><input type="number" id="mm-win" min="1" max="200" value="${m.window_size??20}"><div class="hint">Messages kept per agent; applied immediately.</div></div></div>
       <div class="f"><label>Persist session</label><div class="c"><input type="checkbox" id="mm-per" ${m.persist!==false?'checked':''}><div class="hint">Writes .liber/session.json with credentials redacted.</div></div></div>
       <div class="dsec">Context &amp; compression</div>
       <div class="brow" style="border-top:none;padding-top:0">
         <button class="btn" id="mm-compact">Compact now</button>
         <button class="btn" id="mm-clear">Clear history</button>
-      </div>
-      <div class="brow"><button class="btn primary" id="mm-save">Save memory</button></div>`;
-    p.querySelector('#mm-save').onclick=()=>apply({'memory.window_size':Number(p.querySelector('#mm-win').value),'memory.persist':p.querySelector('#mm-per').checked},'memory');
-    p.querySelector('#mm-compact').onclick=()=>handleSlash('/compact');
-    p.querySelector('#mm-clear').onclick=async()=>{if(!confirm('Clear all session history?'))return;await api('/sessions','DELETE');toast('history cleared');};
+      </div>`;
+
+    const list = p.querySelector('#mm-list');
+    const paint = (data) => {
+      const entries = (data && data.entries) || [];
+      if (!entries.length) { list.innerHTML = '<span style="color:var(--dim)">nothing stored yet — the agent starts each session clean</span>'; return; }
+      list.innerHTML = '';
+      for (const e of entries) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;align-items:baseline;padding:4px 0;border-bottom:.5px solid var(--border)';
+        const k = document.createElement('code');
+        k.textContent = e.key;
+        k.style.cssText = 'color:var(--accent);font-size:11px;min-width:110px';
+        const v = document.createElement('span');
+        v.textContent = String(e.value).slice(0, 120);
+        v.style.cssText = 'flex:1;font-size:12px;color:var(--text)';
+        const del = document.createElement('button');
+        del.className = 'tinybtn';
+        del.textContent = 'forget';
+        del.onclick = async () => {
+          await api('/memory?key=' + encodeURIComponent(e.key), 'DELETE');
+          await loadMemory();
+        };
+        row.append(k, v, del);
+        list.appendChild(row);
+      }
+      const meta = document.createElement('div');
+      meta.style.cssText = 'margin-top:6px;color:var(--dim);font-size:11px';
+      meta.textContent = entries.length + ' entries · ' + (data.chars || 0) + ' of 1400 chars injected';
+      list.appendChild(meta);
+    };
+    const loadMemory = async () => {
+      const r = await api('/memory').catch(() => null);
+      paint(r && r.data);
+    };
+    loadMemory();
+
+    p.querySelector('#mm-add').onclick = async () => {
+      const key = p.querySelector('#mm-key').value.trim();
+      const value = p.querySelector('#mm-val').value.trim();
+      if (!key) { toast('a key is required'); return; }
+      const r = await api('/memory', 'POST', { key, value });
+      if (r && r.data && r.data.success) {
+        p.querySelector('#mm-key').value = '';
+        p.querySelector('#mm-val').value = '';
+        toast('remembered · ' + key);
+        paint(r.data);
+      } else toast('could not save');
+    };
+
+    p.querySelector('#mm-compact').onclick=async()=>{
+      const r=await api('/compact','POST',{});
+      toast(r.status===200?'history compacted':'compact failed');
+    };
+    p.querySelector('#mm-clear').onclick=async()=>{
+      const key=activeSession==='default'?'dev-bot':'dev-bot#'+activeSession;
+      const r=await api('/sessions?key='+encodeURIComponent(key),'DELETE');
+      toast(r.status===200?'session history cleared':'clear failed');
+      streamCache.delete(activeSession);paintSession();
+    };
     return;
   }
-
 
   /* ── ADVANCED ──────────────────────────── */
   if(cat==='advanced'){

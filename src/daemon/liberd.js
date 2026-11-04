@@ -18,6 +18,7 @@ const workspace = require('./core/workspace');
 const skills = require('./core/skills');
 const providers = require('./core/providers');
 const budget = require('./core/budget');
+const memoryBank = require('./core/tools/memory-tool');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -94,6 +95,28 @@ class LiberDaemon {
     }
   }
 
+  /** Facts a fresh session should not have to discover again. */
+  seedStandingFacts(config) {
+    try {
+      const facts = {
+        'workspace.root': process.cwd(),
+        'workspace.os': `${process.platform} ${process.arch}`,
+        'workspace.user': (() => { try { return require('os').userInfo().username; } catch { return null; } })(),
+        'engine.provider': config?.agent?.engine?.provider,
+        'engine.model': config?.agent?.engine?.model
+      };
+      try {
+        const { execFileSync } = require('child_process');
+        const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: process.cwd(), encoding: 'utf8', timeout: 3000, windowsHide: true }).trim();
+        if (remote) facts['workspace.remote'] = remote;
+      } catch { /* not a git repo: fine */ }
+      const added = memoryBank.memorySeed(facts);
+      if (added) logger.info('SYSTEM', 'MEMORY_SEEDED', { added });
+    } catch (err) {
+      logger.warn('SYSTEM', 'MEMORY_SEED_FAILED', { error: err.message });
+    }
+  }
+
   async start(configPath = process.env.LIBER_CONFIG || 'liber.yaml') {
     console.log(`[liberd] Starting Liber Production-Grade Daemon...`);
     try {
@@ -122,6 +145,7 @@ class LiberDaemon {
         metrics: { tokens: 0, requests: 0 }
       });
 
+      this.seedStandingFacts(config);
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
       // Bind to loopback by default: the daemon has no auth, so exposing it on the LAN
       // would let any device spend the API key or call /shutdown. Override deliberately
@@ -647,6 +671,42 @@ class LiberDaemon {
         memory.clear(id);
         for (const m of history) memory.add(id, m.role, m.content);
         res.end(JSON.stringify({ success: true, dropped, remaining: memory.get(id).length }));
+      }
+      else if (endpoint === '/memory') {
+        // The same store the agent's memory tool writes to, exposed so the
+        // window can show what a new session will already know.
+        if (req.method === 'GET') {
+          res.end(JSON.stringify({
+            success: true,
+            entries: memoryBank.memoryEntries(),
+            block: memoryBank.memoryBlock(1400),
+            chars: memoryBank.memoryBlock(1400).length
+          }));
+          return;
+        }
+        if (req.method === 'DELETE') {
+          const key = url.searchParams.get('key');
+          if (!key) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, error: 'Missing key.' }));
+            return;
+          }
+          const out = memoryBank.manageMemory({ action: 'delete', key });
+          res.end(JSON.stringify({ success: true, deleted: key, ...out }));
+          return;
+        }
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const parsed = JSON.parse(body || '{}');
+        const key = String(parsed.key || '').trim();
+        if (!key) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: 'Missing key.' }));
+          return;
+        }
+        const written = memoryBank.manageMemory({ action: 'set', key, value: parsed.value ?? '' });
+        res.end(JSON.stringify({ success: true, ...written, entries: memoryBank.memoryEntries() }));
+        return;
       }
       else if (endpoint === '/budget') {
         const first = Array.from(this.agents.values())[0];
