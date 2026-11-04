@@ -5,7 +5,7 @@ const path = require('path');
 const DEFAULTS = {
   write_roots: ['.'],
   allow_outside_workspace: false,
-  terminal: { mode: 'prompt', allowlist: [], denylist: [] }
+  terminal: { mode: 'prompt', allowlist: [], denylist: [], backend: 'powershell', sandbox: true }
 };
 
 let config = { ...DEFAULTS };
@@ -21,7 +21,16 @@ function configure(policyConfig = {}) {
         ? policyConfig.terminal.mode
         : DEFAULTS.terminal.mode,
       allowlist: (policyConfig.terminal?.allowlist || []).map(String),
-      denylist: (policyConfig.terminal?.denylist || []).map(String)
+      denylist: (policyConfig.terminal?.denylist || []).map(String),
+      // Execution surface: which sandbox runs the command, and its limits.
+      backend: ['powershell', 'docker'].includes(policyConfig.terminal?.backend)
+        ? policyConfig.terminal.backend
+        : DEFAULTS.terminal.backend,
+      sandbox: policyConfig.terminal?.sandbox !== false,
+      image: String(policyConfig.terminal?.image || 'alpine:latest'),
+      allow_network: policyConfig.terminal?.allow_network === true,
+      memory: String(policyConfig.terminal?.memory || '512m'),
+      pids: Number(policyConfig.terminal?.pids) || 128
     }
   };
   return config;

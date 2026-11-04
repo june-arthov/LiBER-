@@ -831,6 +831,43 @@ class LiberDaemon {
         for (const m of history) memory.add(id, m.role, m.content);
         res.end(JSON.stringify({ success: true, dropped, remaining: memory.get(id).length }));
       }
+      else if (endpoint === '/sandbox') {
+        if (req.method === 'GET') {
+          const term = policy.terminalConfig();
+          const terminalTool = require('./core/tools/terminal-tool');
+          const dockerOk = terminalTool.containerAvailable(true);
+          let dockerVersion = null;
+          if (dockerOk) {
+            try {
+              dockerVersion = String(require('child_process').execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], { timeout: 8000, windowsHide: true })).trim();
+            } catch { dockerVersion = null; }
+          }
+          let wsl = false;
+          try {
+            const out = require('child_process').execFileSync('wsl.exe', ['-l', '-q'], { timeout: 8000, windowsHide: true });
+            wsl = String(out).replace(/\0/g, '').trim().length > 0;
+          } catch { wsl = false; }
+          res.end(JSON.stringify({
+            success: true,
+            backend: term.backend,
+            sandbox: term.sandbox,
+            capabilities: {
+              'constrained-language': process.platform === 'win32',
+              docker: dockerOk,
+              wsl,
+              'windows-sandbox': false
+            },
+            docker: { available: dockerOk, server: dockerVersion, image: term.image, network: term.allow_network === true, memory: term.memory, pids: term.pids },
+            note: dockerOk
+              ? 'Commands run in a container with no network, a read-only root and only the workspace mounted.'
+              : 'Docker is not reachable, so commands fall back to PowerShell Constrained Language Mode (not a container).'
+          }));
+          return;
+        }
+        res.statusCode = 405;
+        res.end(JSON.stringify({ success: false, error: 'Method not allowed.' }));
+        return;
+      }
       else if (endpoint === '/connectors' || endpoint === '/connectors/reload') {
         if (endpoint === '/connectors/reload') {
           const out = this.installConnectors();

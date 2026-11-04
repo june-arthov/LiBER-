@@ -258,6 +258,64 @@ function auditTerminal(entry) {
 }
 
 /**
+ * A real container, for when the language-mode sandbox is not enough.
+ *
+ * The command runs inside Docker with: no network, a read-only root filesystem,
+ * a small tmpfs for /tmp, dropped capabilities, no-new-privileges, and a memory
+ * and pid cap. The workspace is the only host path mounted, so the rest of the
+ * machine — including the browser profile and SSH keys — is not reachable.
+ */
+function containerPolicy() {
+  const term = policy.terminalConfig();
+  const requested = term.backend === 'docker';
+  return {
+    on: requested && containerAvailable(),
+    requested,
+    image: term.image || 'alpine:latest',
+    network: term.allow_network === true,
+    memory: term.memory || '512m',
+    pids: Number(term.pids) || 128
+  };
+}
+
+let _dockerCache = null;
+/** Is a Docker daemon reachable? Cached for a minute; the check costs ~50ms. */
+function containerAvailable(force = false) {
+  if (!force && _dockerCache && Date.now() - _dockerCache.at < 60_000) return _dockerCache.ok;
+  let ok = false;
+  try {
+    const out = require('child_process').execFileSync('docker', ['version', '--format', '{{.Server.Version}}'],
+      { timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    ok = String(out).trim().length > 0;
+  } catch { ok = false; }
+  _dockerCache = { ok, at: Date.now() };
+  return ok;
+}
+
+function runContainer(command, { cwd, timeout, profile }) {
+  const { execFile } = require('child_process');
+  const mount = `${path.resolve(process.cwd())}:/work:rw`;
+  const args = [
+    'run', '--rm', '--interactive',
+    ...(profile.network ? ['--network', 'bridge'] : ['--network', 'none']),
+    '--read-only',
+    '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
+    '--memory', profile.memory,
+    '--pids-limit', String(profile.pids),
+    '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges',
+    '-v', mount,
+    '-w', '/work',
+    profile.image,
+    'sh', '-lc', command
+  ];
+  return new Promise((resolve) => {
+    execFile('docker', args, { timeout, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
+      (error, stdout, stderr) => resolve({ error, stdout: String(stdout || ''), stderr: String(stderr || '') }));
+  });
+}
+
+/**
  * Run under Constrained Language Mode via a throwaway script file. A file avoids
  * every quoting trap that inline -Command has with quotes and $ signs.
  */
@@ -304,7 +362,9 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
   const isWindows = process.platform === 'win32';
   const shellOption = isWindows ? 'powershell.exe' : '/bin/bash';
   const sandbox = sandboxPolicy();
-  auditTerminal({ decision: 'allow', command, cwd, sandbox: sandbox.on ? 'constrained-language' : 'none' });
+  const container = containerPolicy();
+  const backend = container.on ? 'docker' : (sandbox.on ? 'constrained-language' : 'none');
+  auditTerminal({ decision: 'allow', command, cwd, sandbox: backend });
 
   const finish = (error, stdout, stderr) => {
     const durationMs = Date.now() - startTime;
@@ -318,7 +378,7 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
       truncated = true;
     }
     const exitCode = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-    auditTerminal({ decision: 'run', command, exit_code: exitCode, duration_ms: durationMs, sandbox: sandbox.on ? 'constrained-language' : 'none' });
+    auditTerminal({ decision: 'run', command, exit_code: exitCode, duration_ms: durationMs, sandbox: backend });
     if (error) {
       return {
         command,
@@ -327,7 +387,8 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
         error: errStr || error.message,
         duration_ms: durationMs,
         truncated,
-        sandboxed: sandbox.on
+        sandboxed: backend !== 'none',
+        backend
       };
     }
     // stderr is not noise: a blocked call explains itself there and nowhere else
@@ -340,9 +401,19 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
       output: withErr || '(command succeeded with no output)',
       duration_ms: durationMs,
       truncated,
-      sandboxed: sandbox.on
+      sandboxed: backend !== 'none',
+      backend
     };
   };
+
+  if (container.on) {
+    const { error, stdout, stderr } = await runContainer(command, {
+      cwd,
+      timeout: parseInt(timeout, 10) || 45000,
+      profile: container
+    });
+    return finish(error, stdout, stderr);
+  }
 
   if (sandbox.on) {
     const { error, stdout, stderr } = await runSandboxed(command, {
@@ -372,5 +443,7 @@ module.exports = {
   isCommandSensitive,
   evaluatePolicy,
   sandboxPolicy,
-  sandboxEnv
+  sandboxEnv,
+  containerPolicy,
+  containerAvailable
 };

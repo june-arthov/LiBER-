@@ -3116,9 +3116,35 @@ async function renderPanel(){
       <div class="f"><label>Require read-back</label><div class="c"><input type="checkbox" id="s-rb" ${g.require_readback!==false?'checked':''}></div></div>
       <div class="f"><label>Require citations</label><div class="c"><input type="checkbox" id="s-cite" ${g.require_citations!==false?'checked':''}></div></div>
       <div class="f"><label>Semantic verifier</label><div class="c"><input type="checkbox" id="s-sem" ${g.semantic_verifier!==false?'checked':''}><div class="hint">Fails open (PASS with semantic: error) when the verifier model is unreachable.</div></div></div>
+      <div class="dsec">Command sandbox</div>
+      <div id="s-box" class="pmeta" style="padding:0 0 8px;font-size:11.5px;color:var(--muted)">probing…</div>
+      <div class="f"><label>Execution surface</label><div class="c">
+        <select id="s-backend" style="width:100%">
+          <option value="docker">docker — container, no network, read-only root</option>
+          <option value="powershell">powershell — constrained language mode, same machine</option>
+        </select>
+        <div class="hint">A container cannot see Windows, your keys or the network. The PowerShell mode stays on this machine and is a much thinner barrier.</div>
+      </div></div>
+      <div class="f"><label>Container image</label><div class="c"><input type="text" id="s-image" placeholder="alpine:latest"><div class="hint">Only the workspace is mounted, at /work, read-write. The root filesystem is read-only.</div></div></div>
+      <div class="f"><label>Allow container network</label><div class="c"><input type="checkbox" id="s-net"><div class="hint">Off by default: a command that needs the internet should say so out loud.</div></div></div>
       <div class="dsec">Privacy &amp; network</div>
       <div class="f"><label>Allowed URLs</label><div class="c"><input type="text" value="fetch_url is unrestricted; no per-URL rules in this build" disabled style="opacity:.7"></div></div>
       <div class="brow"><button class="btn primary" id="s-save">Save safety</button></div>`;
+    (async()=>{
+      const r=await api('/sandbox').catch(()=>null);
+      const d=(r&&r.data)||{};
+      const box=p.querySelector('#s-box');
+      if(box && d.capabilities){
+        const caps=d.capabilities;
+        box.innerHTML=''
+          +'<div>'+ (d.backend==='docker'&&caps.docker ? '✓ running in a container' : '⚠ running on this machine (no container)') +'</div>'
+          +'<div style="margin-top:3px">constrained-language: '+(caps['constrained-language']?'available':'—')+' · docker: '+(caps.docker?('available ('+(d.docker&&d.docker.server||'?')+')'):'unavailable')+' · wsl: '+(caps.wsl?'present':'—')+'</div>'
+          +'<div style="margin-top:3px;color:var(--dim)">'+esc(d.note||'')+'</div>';
+        if(p.querySelector('#s-backend')) p.querySelector('#s-backend').value=d.backend||'docker';
+        if(p.querySelector('#s-image')&&d.docker) p.querySelector('#s-image').value=d.docker.image||'alpine:latest';
+        if(p.querySelector('#s-net')&&d.docker) p.querySelector('#s-net').checked=!!d.docker.network;
+      }
+    })();
     p.querySelector('#s-save').onclick=async()=>{
       const pr=PRESETS.find(x=>x.id===p.querySelector('#s-preset').value);
       await applyPreset(pr);
@@ -3127,7 +3153,10 @@ async function renderPanel(){
         'grounding.max_repairs':Number(p.querySelector('#s-rep').value),
         'grounding.require_readback':p.querySelector('#s-rb').checked,
         'grounding.require_citations':p.querySelector('#s-cite').checked,
-        'grounding.semantic_verifier':p.querySelector('#s-sem').checked
+        'grounding.semantic_verifier':p.querySelector('#s-sem').checked,
+        'policy.terminal.backend':(p.querySelector('#s-backend')||{}).value||'docker',
+        'policy.terminal.image':((p.querySelector('#s-image')||{}).value||'alpine:latest').trim()||'alpine:latest',
+        'policy.terminal.allow_network':!!(p.querySelector('#s-net')||{}).checked
       },'safety');
     };
     return;

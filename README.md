@@ -260,6 +260,41 @@ When intercepted, execution pauses and alerts the operator:
 - **`[A]`**: Approve execution
 - **`[D]`**: Deny execution and prompt agent to adapt
 
+### Where commands actually run
+
+`policy.terminal.backend` picks the execution surface, and the gate is enforced by
+the machine rather than by the prompt:
+
+| backend | isolation | what it means |
+| --- | --- | --- |
+| `docker` | container | no network, read-only root filesystem, dropped capabilities, `no-new-privileges`, memory and pid caps, and **only the workspace** mounted (at `/work`, read-write). The Windows filesystem, browser profile and SSH keys are not reachable. |
+| `powershell` | language mode | same machine, but PowerShell runs in **Constrained Language Mode**, which refuses `[System.IO.File]`, `Add-Type` and reflection; the child gets a scrubbed environment so provider keys are not inherited. |
+
+Every decision and every run is appended to `.liber/terminal-audit.log`, and
+`GET /sandbox` reports which surfaces are actually available on this machine.
+Docker Desktop must be running for the container backend; when it is not, LiBER
+falls back to Constrained Language Mode and says so instead of pretending.
+
+---
+
+## 🔑 Clients and tokens
+
+Each client gets its own token, scopes (`read`, `chat`, `tools`, `admin`) and a
+per-minute rate limit. Tokens are stored as SHA-256 only, shown once at creation,
+and can be rotated or revoked without touching other clients. Every request is
+appended to `.liber/auth-audit.log` with the client id, scope, status and
+duration. Manage them in **Settings → Access & Tokens** (`GET/POST/DELETE
+/clients`, `POST /clients/rotate`).
+
+---
+
+## 🔐 Secrets
+
+Provider keys and tokens live in an AES-256-GCM vault (`.liber/vault.json`, key at
+`.liber/vault.key`, `0600`); listings expose only the last four characters, a
+tampered ciphertext fails closed, and connectors may reference a secret as
+`vault:name` so it is resolved at call time and never enters a prompt.
+
 ---
 
 ## 📄 Architecture
