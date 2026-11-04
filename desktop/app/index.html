@@ -121,9 +121,10 @@
   .cmeta .br b{color:var(--accent);font-weight:500}
 
   /* popovers */
-  .pop{position:fixed;z-index:200;background:var(--panel);border:1px solid var(--border-strong);border-radius:9px;box-shadow:0 16px 44px rgba(0,0,0,.6);padding:6px;min-width:230px;display:none}
-  .pop.open{display:block}
-  .pop .ph{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);padding:6px 8px 4px}
+  .pop{position:fixed;z-index:200;background:var(--panel);border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.7);padding:6px;min-width:250px;max-width:min(460px,calc(100vw - 20px));max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;display:none}
+  .pop.open{display:block;animation:popIn .11s ease-out}
+  @keyframes popIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .pop .ph{position:sticky;top:-6px;z-index:2;background:var(--panel);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);padding:6px 8px 5px;margin:-6px -6px 0;border-bottom:1px solid var(--border)}
   .pop .pi{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px}
   .pop .pi:hover,.pop .pi.sel{background:var(--panel2)}
   .pop .pi .nm{color:var(--text)}
@@ -673,17 +674,49 @@ function renderChips(){
 
 /* ── popovers ────────────────────────────────── */
 function closePops(){document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open'));}
+/**
+ * Place a popover next to its anchor without ever going off-screen:
+ * pick the side (above/below) with more room, cap the height to that room,
+ * then clamp on both axes. Content taller than the cap scrolls inside.
+ */
 function placePop(pop,anchor,align='left'){
   pop.classList.add('open');
-  const r=anchor.getBoundingClientRect();
+  pop.style.maxHeight='';
   pop.style.left='0px';pop.style.top='0px';
-  const w=pop.offsetWidth,h=pop.offsetHeight;
+
+  const r=anchor.getBoundingClientRect();
+  const vh=window.innerHeight,vw=window.innerWidth;
+  const gutter=10;
+  const above=Math.max(0,r.top-gutter), below=Math.max(0,vh-r.bottom-gutter);
+
+  // natural height, measured unconstrained
+  const naturalH=pop.offsetHeight;
+  const room=naturalH<=above?above:(naturalH<=below?below:Math.max(above,below));
+  pop.style.maxHeight=Math.max(120,room-6)+'px';
+
+  const w=pop.offsetWidth;
+  const h=pop.offsetHeight;
+
   let left=align==='right'?r.right-w:r.left;
-  left=Math.max(8,Math.min(left,window.innerWidth-w-8));
-  let top=r.top-h-8;
-  if(top<44)top=r.bottom+8;
-  pop.style.left=left+'px';pop.style.top=top+'px';
+  left=Math.max(gutter,Math.min(left,vw-w-gutter));
+
+  let top;
+  if(naturalH<=above){top=r.top-h-6;}
+  else if(naturalH<=below){top=r.bottom+6;}
+  else if(above>=below){top=gutter;}
+  else {top=Math.max(gutter,vh-h-gutter);}
+
+  top=Math.max(gutter,Math.min(top,vh-h-gutter));
+  pop.style.left=left+'px';
+  pop.style.top=top+'px';
 }
+
+/** Keep a popover glued to its anchor when the window resizes. */
+let popAnchor=null, popEl=null;
+function trackPop(pop,anchor){popEl=pop;popAnchor=anchor;}
+window.addEventListener('resize',()=>{
+  if(popEl&&popEl.classList.contains('open')&&popAnchor)placePop(popEl,popAnchor,'right');
+});
 
 const MENUS={
   file:[
@@ -751,6 +784,7 @@ async function loadLiveModels(force) {
 
 async function openModelPop(anchor) {
   const pop = $('pop-model');
+  trackPop(pop, anchor);
   pop.innerHTML = '<div class="ph">Model · asking the provider…</div>';
   placePop(pop, anchor, 'right');
   const models = await loadLiveModels(false);
@@ -759,39 +793,43 @@ async function openModelPop(anchor) {
 
 function renderModelPop(anchor, models, filter) {
   const pop = $('pop-model');
-  const q = String(filter || '').toLowerCase();
-  const live = models.filter(m => !q || String(m).toLowerCase().includes(q));
-  const presets = CATALOG.filter(c => !models.includes(c.model) && (!q || c.label.toLowerCase().includes(q) || c.model.toLowerCase().includes(q)));
-
   pop.innerHTML = `
     <div class="ph" style="display:flex;align-items:center;gap:6px">
-      <span>Model · ${models.length} available</span>
+      <span id="mp-count">Model · ${models.length} available</span>
       <span style="flex:1"></span>
       <button class="tinybtn" id="mp-refresh" title="Ask the provider again">refresh</button>
     </div>
     <div style="padding:4px 6px 6px"><input id="mp-search" placeholder="filter models" value="${esc(filter || '')}"
-      style="width:100%;background:var(--panel2);border:1px solid var(--border-strong);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;font-family:var(--mono);outline:none"></div>`;
+      style="width:100%;background:var(--panel2);border:1px solid var(--border-strong);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;font-family:var(--mono);outline:none"></div>
+    <div id="mp-live" style="max-height:min(232px,30vh);overflow:auto"></div>
+    <div id="mp-empty" class="pi" style="display:none"><div class="ds">No model matched.</div></div>`;
 
-  const list = add(pop, 'div', '');
-  list.style.cssText = 'max-height:260px;overflow:auto';
-  if (!live.length) {
-    add(list, 'div', 'pi', `<div class="ds">No model matched. ${models.length ? 'Try another filter.' : 'The endpoint returned nothing — check the key in Settings → Providers.'}</div>`);
-  }
-  for (const id of live) {
+  const list = pop.querySelector('#mp-live');
+  for (const id of models) {
     const d = add(list, 'div', 'pi' + (id === currentModel ? ' sel' : ''));
+    d.dataset.model = String(id).toLowerCase();
     d.innerHTML = `<div class="r"><span class="nm">${esc(id)}</span>${id === currentModel ? '<span class="tag">current</span>' : ''}</div>`;
     d.onclick = () => { closePops(); switchToModel(id); };
+    d.setAttribute("role","button"); d.tabIndex=0;
+  }
+  if (!models.length) {
+    pop.querySelector('#mp-empty').style.display = '';
+    pop.querySelector('#mp-empty').innerHTML = '<div class="ds">The endpoint returned no models — check the key in Settings → Providers, then press refresh.</div>';
   }
 
+  const presets = CATALOG.filter(c => !models.includes(c.model));
   if (presets.length) {
     add(pop, 'div', 'sep');
     add(pop, 'div', 'ph', 'Other providers (presets)');
     const pl = add(pop, 'div', '');
-    pl.style.cssText = 'max-height:150px;overflow:auto';
+    pl.id = 'mp-presets';
+    pl.style.cssText = 'max-height:min(112px,15vh);overflow:auto';
     for (const m of presets) {
       const d = add(pl, 'div', 'pi');
+      d.dataset.preset = (m.label + ' ' + m.model + ' ' + m.provider).toLowerCase();
       d.innerHTML = `<div class="r"><span class="nm">${esc(m.label)}</span><span class="tag">${esc(m.provider)}</span></div>`;
       d.onclick = () => { closePops(); applyModel(m); };
+      d.setAttribute("role","button"); d.tabIndex=0;
     }
   }
 
@@ -800,27 +838,46 @@ function renderModelPop(anchor, models, filter) {
   for (const lvl of ['auto', 'low', 'medium', 'high']) {
     const d = add(pop, 'div', 'pi' + (lvl === reasoning ? ' sel' : ''), `<span class="nm">${lvl[0].toUpperCase() + lvl.slice(1)}</span>`);
     d.onclick = () => { closePops(); applyReasoning(lvl); };
+    d.setAttribute("role","button"); d.tabIndex=0;
   }
 
+  // Filter in place: keeps focus, caret and scroll position intact.
   const search = pop.querySelector('#mp-search');
-  if (search) {
-    search.addEventListener('input', () => {
-      const pos = search.selectionStart;
-      renderModelPop(anchor, models, search.value);
-      const again = $('mp-search');
-      if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch { /* noop */ } }
+  const applyFilter = () => {
+    const q = search.value.trim().toLowerCase();
+    let shown = 0;
+    pop.querySelectorAll('#mp-live .pi[data-model]').forEach(el => {
+      const hit = !q || el.dataset.model.includes(q);
+      el.style.display = hit ? '' : 'none';
+      if (hit) shown++;
     });
-    search.focus();
-  }
-  const refresh = pop.querySelector('#mp-refresh');
-  if (refresh) refresh.onclick = async (e) => {
+    pop.querySelectorAll('#mp-presets .pi[data-preset]').forEach(el => {
+      const hit = !q || el.dataset.preset.includes(q);
+      el.style.display = hit ? '' : 'none';
+      if (hit) shown++;
+    });
+    const empty = pop.querySelector('#mp-empty');
+    if (models.length) empty.style.display = shown ? 'none' : '';
+    pop.querySelector('#mp-count').textContent = q
+      ? `Model · ${shown} match${shown === 1 ? '' : 'es'} of ${models.length}`
+      : `Model · ${models.length} available`;
+    placePop(pop, anchor, 'right');
+  };
+  search.addEventListener('input', applyFilter);
+  if (filter) applyFilter();
+
+  pop.querySelector('#mp-refresh').onclick = async (e) => {
     e.stopPropagation();
-    refresh.textContent = '…';
+    const btn = e.currentTarget;
+    btn.textContent = '…';
+    btn.disabled = true;
     const fresh = await loadLiveModels(true);
-    renderModelPop(anchor, fresh, filter || '');
+    renderModelPop(anchor, fresh, search.value);
     toast(fresh.length ? fresh.length + ' models from the endpoint' : 'the endpoint returned no models');
   };
+
   placePop(pop, anchor, 'right');
+  setTimeout(() => { try { search.focus(); search.select(); } catch { /* noop */ } }, 0);
 }
 
 /** Switch to a model the provider actually listed (same provider/endpoint). */
@@ -830,6 +887,7 @@ async function switchToModel(id) {
     currentModel = id;
     renderModel();
     liveKeyInvalidate();
+    loadProjects().catch(()=>{});
     toast('model → ' + id);
   } else {
     toast('switch failed: ' + (data.error || status));
@@ -841,7 +899,7 @@ async function applyModel(m){
     'engine.model':m.model,'engine.provider':m.provider,'engine.endpoint':m.endpoint
   });
   if(status===200&&data.success){
-    currentModel=m.model;currentEndpoint=m.endpoint||currentEndpoint;renderModel();liveKeyInvalidate();toast('model → '+m.model);
+    currentModel=m.model;currentEndpoint=m.endpoint||currentEndpoint;renderModel();liveKeyInvalidate();loadProjects().catch(()=>{});toast('model → '+m.model);
   }else toast('failed: '+(data.error||status));
 }
 async function applyReasoning(lvl){
@@ -851,6 +909,7 @@ async function applyReasoning(lvl){
 }
 function openPermsPop(anchor){
   const pop=$('pop-perms');
+  trackPop(pop,anchor);
   pop.innerHTML='<div class="ph">Agent permissions</div>';
   for(const p of PRESETS){
     const d=add(pop,'div','pi'+(p.id===permissions?' sel':''));
@@ -866,6 +925,7 @@ async function applyPreset(p){
 }
 function openSlashPop(anchor,filter){
   const pop=$('pop-slash');
+  trackPop(pop,anchor);
   const q=(filter||'').toLowerCase();
   const items=SLASH.filter(s=>s.cmd.startsWith(q)||!q);
   if(!items.length){closePops();return;}
@@ -879,6 +939,7 @@ function openSlashPop(anchor,filter){
 }
 function openAtPop(anchor){
   const pop=$('pop-at');
+  trackPop(pop,anchor);
   pop.innerHTML='<div class="ph">Add context</div>';
   api('/workspace').then(({data})=>{
     const files=(data?.workspace?.changed_files||[]).map(f=>f.path);
@@ -1267,7 +1328,9 @@ $('btn-compact').onclick=()=>handleSlash('/compact');
 $('btn-review').onclick=()=>openOverview('review');
 document.querySelectorAll('.ovrow').forEach(r=>r.onclick=()=>openOverview(r.dataset.ov));
 document.addEventListener('click',e=>{
-  if(!e.target.closest('.pop')&&!e.target.closest('[data-menu]')&&!['btn-model','btn-perms','btn-context'].includes(e.target.id))closePops();
+  if(e.target.closest('.pop'))return;
+  if(e.target.closest('[data-menu],#btn-model,#btn-perms,#btn-context'))return;
+  closePops();
 });
 document.addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
