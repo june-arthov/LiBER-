@@ -22,6 +22,7 @@ class LLMManager {
    * @param {Object} config - Bagian 'engine' dari liber.yaml
    */
   initialize(config) {
+    this.engineConfig = { ...config };
     const ProviderClass = this.adapters[config.provider];
     if (!ProviderClass) {
       throw new Error(`Unsupported LLM provider: ${config.provider}`);
@@ -42,9 +43,42 @@ class LLMManager {
     return /HTTP (429|5\d\d)|timeout|timed out|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|fetch failed|network|socket hang up|aborted/i.test(msg);
   }
 
+  /**
+   * Retry the same request on the next model of the SAME provider/endpoint.
+   * That is all a single-key setup can do: same base URL and key, different
+   * model id, so a dead or over-quota model does not kill the turn.
+   */
+  async _withModelFallback(fn, canRetry = () => true) {
+    const base = this.engineConfig || {};
+    const chain = [base.model, ...(Array.isArray(base.fallback_models) ? base.fallback_models : [])]
+      .map(m => String(m || '').trim())
+      .filter((m, i, all) => m && all.indexOf(m) === i);
+    let index = 0;
+    let lastErr;
+    for (;;) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        const next = chain[index + 1];
+        if (!next || !canRetry()) break;
+        try {
+          this.initialize({ ...base, model: next });
+        } catch (initErr) {
+          lastErr = initErr;
+          break;
+        }
+        this.lastFallback = { from: chain[index], to: next, error: String(err && err.message || err).slice(0, 200), at: Date.now() };
+        if (typeof this.onFallback === 'function') { try { this.onFallback(this.lastFallback); } catch { /* never break a turn */ } }
+        index++;
+      }
+    }
+    throw lastErr;
+  }
+
   async generate(messages, options = {}) {
     if (!this.activeAdapter) throw new Error("LLM Engine not initialized. Call initialize() first.");
-    return this._withRetry(() => this.activeAdapter.generate(messages, options));
+    return this._withModelFallback(() => this._withRetry(() => this.activeAdapter.generate(messages, options)));
   }
 
   /**
@@ -55,7 +89,7 @@ class LLMManager {
     if (typeof this.activeAdapter.chat !== 'function') {
       throw new Error('Active adapter does not support native tool calling.');
     }
-    return this._withRetry(() => this.activeAdapter.chat(messages, options));
+    return this._withModelFallback(() => this._withRetry(() => this.activeAdapter.chat(messages, options)));
   }
 
   async _withRetry(fn) {
@@ -89,7 +123,11 @@ class LLMManager {
     if (typeof this.activeAdapter.stream !== 'function') {
       throw new Error('Active adapter does not support streaming.');
     }
-    return this.activeAdapter.stream(messages, onChunk, options);
+    // A stream that already emitted text cannot be replayed: falling back would
+    // duplicate the partial answer, so retry only while nothing was sent.
+    let emitted = false;
+    const guard = (t) => { emitted = true; onChunk(t); };
+    return this._withModelFallback(() => this.activeAdapter.stream(messages, guard, options), () => !emitted);
   }
 }
 

@@ -14,6 +14,7 @@ const SCHEMA = {
   'engine.reasoning_effort': { kind: 'enum', values: REASONING_EFFORTS },
   'engine.max_tokens': { kind: 'int', min: 0, max: 1_048_576 },
   'engine.temperature': { kind: 'float', min: 0, max: 2 },
+  'engine.fallback_models': { kind: 'string_list' },
   'engine.top_p': { kind: 'float', min: 0, max: 1 },
   'grounding.enabled': { kind: 'boolean' },
   'grounding.max_repairs': { kind: 'int', min: 0, max: 5 },
@@ -118,6 +119,21 @@ function patchYamlKey(text, path, value) {
       return lines.join('\n');
     }
   }
+
+  // The key does not exist yet: a setting the UI can change must be persistable,
+  // otherwise it silently disappears at the next daemon start. Insert it at the
+  // end of its parent block, matching that block's indentation.
+  if (depth > 0) {
+    let insertAt = pos;
+    for (let i = pos; i < lines.length; i++) {
+      const m = lines[i].match(/^(\s*)([A-Za-z_][\w-]*):/);
+      if (m && m[1].length < depth) break;
+      if (String(lines[i]).trim()) insertAt = i + 1;
+    }
+    const pad = ' '.repeat(depth);
+    lines.splice(insertAt, 0, `${pad}${last}: ${yamlValue(value)}`);
+    return lines.join('\n');
+  }
   return text;
 }
 
@@ -139,7 +155,12 @@ function sanitizeConfig(config, traceEnabled, cwd) {
       model: engine.model || null,
       endpoint: engine.endpoint || null,
       context_window: engine.context_window || 32000,
-      context_window_override: engine.context_window_override || 0
+      context_window_override: engine.context_window_override || 0,
+      fallback_models: Array.isArray(engine.fallback_models) ? engine.fallback_models.slice(0, 8) : [],
+      reasoning_effort: engine.reasoning_effort || 'auto',
+      max_tokens: engine.max_tokens || null,
+      temperature: engine.temperature ?? null,
+      top_p: engine.top_p ?? null
     },
     grounding: { ...(config?.grounding || {}) },
     policy: sanitizePolicy(),
@@ -171,6 +192,7 @@ const DEFAULTS = {
   'engine.reasoning_effort': 'auto',
   'engine.max_tokens': 4096,
   'engine.temperature': 0.2,
+  'engine.fallback_models': [],
   'engine.top_p': 1,
   'engine.context_window_override': 0,
   'grounding.enabled': true,

@@ -442,6 +442,10 @@ class LiberEngine {
     let nativeTools = agentConfig.engine?.native_tools === true;
     let subSeq = 0;
     let finalAsked = false; // one protocol nudge per turn, never more
+    // A turn can switch model mid-flight when the provider rejects the primary
+    // one; the client should see that instead of wondering why the voice changed.
+    const fallbackTrail = [];
+    let lastFallbackAt = 0;
     let hurryAsked = false; // one "converge now" nudge per turn
 
     const persistTurn = () => {
@@ -584,6 +588,12 @@ class LiberEngine {
           logger.error(agentId, 'LLM_ERROR', { error: err.message });
           response = `Error: LLM provider unavailable (${err.message})`;
         }
+      }
+      // the manager may have moved to a fallback model while producing this reply
+      if (llmManager.lastFallback && llmManager.lastFallback.at !== lastFallbackAt) {
+        lastFallbackAt = llmManager.lastFallback.at;
+        fallbackTrail.push({ ...llmManager.lastFallback });
+        onEvent('fallback', { ...llmManager.lastFallback });
       }
       const llmMs = Math.max(1, Date.now() - llmStart);
       const usage = typeof llmManager.getLastUsage === 'function' ? llmManager.getLastUsage() : null;
@@ -981,6 +991,7 @@ class LiberEngine {
       success: true,
       response: finalResponse,
       stopped,
+      fallbacks: fallbackTrail,
       grounded: auditResult ? auditResult.passed : null,
       usage: usageReport,
       streamed: streamedAny,

@@ -17,7 +17,8 @@
     "os.execCommand",
     "os.getEnv",
     "os.showFolderDialog",
-    "os.open"
+    "os.open",
+    "os.showNotification"
   ],
   "modes": {
     "window": {

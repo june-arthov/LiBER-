@@ -50,3 +50,16 @@ test('terminal policy reconfigures live via config-apply shape', () => {
   policy.configure({ terminal: { mode: 'prompt', allowlist: ['rm -rf node_modules'], denylist: [] } });
   assert.equal(evaluatePolicy('rm -rf node_modules').denied, false, 'an allowlisted prefix still runs');
 });
+
+test('a key the YAML does not have yet is inserted, not silently dropped', () => {
+  const { patchYamlKeys } = require('../src/daemon/core/config-apply');
+  const yaml = ['agent:', '  engine:', '    provider: openai', '    model: "m1"', 'limits:', '  max_loops: 3'].join('\n');
+  // the daemon maps engine.* to agent.engine.* before writing
+  const out = patchYamlKeys(yaml, { 'agent.engine.fallback_models': ['m2', 'm3'] });
+  assert.match(out, /fallback_models: \["m2", ?"m3"\]|fallback_models:\n/);
+  // and the block order survives: the new key sits under engine, not under limits
+  const lines = out.split('\n');
+  const at = lines.findIndex(l => l.includes('fallback_models'));
+  assert.ok(lines[at].startsWith('    '), 'inserted with the engine block indentation');
+  assert.ok(at < lines.findIndex(l => l.startsWith('limits:')), 'inserted before the next top-level block');
+});

@@ -1486,6 +1486,7 @@ async function runTurn(message, opts = {}){
         `<span class="tag">[${payload.evidence}]</span> <span class="${ok?'ok':'bad'}">${esc(payload.tool)} ${ok?'OK':'FAILED'}${payload.exit_code?` (exit ${payload.exit_code})`:''}</span>${tgt}`,
         payload.output||'');
     }else if(name==='hitl_intercept'){
+      notifyDesktop('LiBER needs approval', payload.target || payload.tool || 'a tool is waiting for you');
       showHitl(turn,payload);
     }else if(name==='hitl_approved'){
       step(stepsWrap,'obs','✔ APPROVED',payload.retried?'Re-dispatched after your approval.':'Approved by you.');
@@ -1513,6 +1514,7 @@ async function runTurn(message, opts = {}){
       closeThink();
       recordArtifacts(payload.grounding);
       refreshBudget().catch(()=>{});
+      notifyDesktop('LiBER · done', String(payload.response||'turn finished').slice(0,180));
       {
         const cur=activeSessionObj();
         if(cur && (cur.title==='New session' || cur.title==='Current session') && lastUserText){
@@ -1680,6 +1682,16 @@ async function handleSlash(raw){
 async function doRevert(turns){
   const {data}=await api('/revert','POST',{agentId:'dev-bot',turns});
   toast(data.success?`dropped ${data.dropped} messages · ${data.remaining} left`:(data.error||'revert failed'));
+}
+/** Desktop toast, only when the window is not in front and the user asked for it. */
+function notifyDesktop(title, body){
+  try{
+    const prefs=uiPrefs();
+    if(prefs.notifyDone===false) return;
+    if(document.hasFocus()) return;                 // the answer is right there
+    if(typeof window.Neutralino==='undefined'||!Neutralino.os?.showNotification) return;
+    Neutralino.os.showNotification(String(title).slice(0,60), String(body||'').replace(/\s+/g,' ').slice(0,180));
+  }catch{}
 }
 function toast(msg){
   let t=$('toast');
@@ -2634,7 +2646,6 @@ const NAV=[
   {id:'shortcuts',label:'Shortcuts',icon:'⌨'},
   {id:'about',label:'About',icon:'ℹ'}
 ];
-let dstate={cat:'general',item:null};
 function f(label,input,hint){
   const d=document.createElement('div');d.className='f';
   d.innerHTML=`<label>${label}</label><div class="c">${input}${hint?`<div class="hint">${hint}</div>`:''}</div>`;
@@ -2647,7 +2658,7 @@ function openDrawer(){
 }
 function closeDrawer(){$('drawer-overlay').classList.remove('open');}
 /** Open the settings drawer on a specific category (skips the tree). */
-function openSettingsAt(cat){dstate.cat=cat;dstate.item=null;dstate.q='';openDrawer();}
+function openSettingsAt(cat){ds={cat,item:null};openDrawer();}
 function applyAccent(col){
   document.documentElement.style.setProperty('--accent',col);
   try{localStorage.setItem('liber-accent',col);}catch{}
@@ -2860,13 +2871,21 @@ async function renderPanel(){
       return;
     }
     if(item==='fallback'){
-      p.innerHTML=`<h3>Fallback models</h3><div class="pd">Models tried in order when the main model fails.</div>
-        <div class="card"><div class="card-h">No fallback chain configured</div>
-        <div class="card-b" style="padding:10px 11px;font-family:var(--sans);font-size:12px;color:var(--muted);line-height:1.6">
-        The daemon retries the active model (429/5xx/timeout, ${'engine.retry_attempts'} attempts with backoff) but does not switch providers. A fallback chain needs a config array this build does not declare, so the control stays disabled rather than pretending.
-        </div></div>
-        <div class="f"><label>Current behaviour</label><div class="c"><input type="text" value="retry same model, then fail honestly" disabled style="opacity:.7"></div></div>
-        <div class="brow"><button class="btn" disabled>Add fallback</button></div>`;
+      const chain = Array.isArray(e.fallback_models) ? e.fallback_models : [];
+      p.innerHTML=`<h3>Fallback models</h3>
+        <div class="pd">Tried in order when the main model fails — same provider and the same API key, a different model id. One key is enough.</div>
+        <div class="f"><label>Chain</label><div class="c"><textarea id="fb-list" rows="5" placeholder="glm-5.3-flash&#10;gpt-oss:120b">${chain.join('\n')}</textarea>
+          <div class="hint">One model id per line, best first. Leave empty to disable. Only models the current provider serves.</div></div></div>
+        <div class="brow" style="gap:6px;flex-wrap:wrap">
+          <button class="btn primary" id="fb-save">Save chain</button>
+          <button class="tinybtn" id="fb-clear">Clear</button>
+        </div>
+        <div class="pmeta" style="padding:8px 0 0">A failed call is retried on the next model; a stream that already emitted text is not replayed, so partial answers are never duplicated.</div>`;
+      p.querySelector('#fb-clear').onclick=()=>{p.querySelector('#fb-list').value='';};
+      p.querySelector('#fb-save').onclick=async()=>{
+        const list=p.querySelector('#fb-list').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean).slice(0,8);
+        await apply({'engine.fallback_models':list},'fallback');
+      };
       return;
     }
     if(item==='auxiliary'){
@@ -3171,12 +3190,34 @@ async function renderPanel(){
     return;
   }
 
+  /* ── NOTIFICATIONS ─────────────────────── */
+  if(cat==='notifications'){
+    const prefs=uiPrefs();
+    p.innerHTML=`<h3>Notifications</h3>
+      <div class="pd">A desktop toast when a turn finishes or needs you — the window only, nothing is sent anywhere.</div>
+      <div class="f"><label>Notify when a turn finishes</label><div class="c"><input type="checkbox" id="nt-done" ${prefs.notifyDone!==false?'checked':''}><div class="hint">Skipped while this window is focused.</div></div></div>
+      <div class="brow" style="gap:6px;flex-wrap:wrap"><button class="btn primary" id="nt-save">Save</button><button class="tinybtn" id="nt-test">Send a test toast</button></div>`;
+    p.querySelector('#nt-save').onclick=()=>{
+      const next={...uiPrefs(),notifyDone:!!p.querySelector('#nt-done').checked};
+      setUiPrefs({notifyDone:next.notifyDone});
+      toast('notifications '+(next.notifyDone?'on':'off'));
+    };
+    p.querySelector('#nt-test').onclick=async()=>{
+      try{
+        if(typeof window.Neutralino==='undefined'||!Neutralino.os?.showNotification){ toast('desktop notifications are not available here'); return; }
+        await Neutralino.os.showNotification('LiBER','Test toast — this is how a finished turn will look.');
+        toast('test toast sent');
+      }catch(err){ toast('toast failed: '+err.message); }
+    };
+    return;
+  }
+
   /* ── HONEST STUBS ──────────────────────── */
   const STUBS={
     browser:['Browser','A built-in browser and browser subagent do not exist in this daemon; fetch_url and web_search are the only network tools.'],
     vault:['Passwords &amp; Logins','There is no credential vault here. Provider keys come from .env and are never read back by the agent.'],
     voice:['Voice','No speech-to-text or text-to-speech pipeline is wired into LiBER.'],
-    notifications:['Notifications','The daemon emits no desktop notifications; turn results are only visible in this window.'],
+
     billing:['Billing','LiBER runs on your own API keys. There is no metering, credit balance or plan — limits are enforced locally in the Advanced page.'],
     gateways:['Gateways','Remote gateway connections are not part of this build; the daemon listens on loopback only.']
   };
@@ -3189,7 +3230,7 @@ async function renderPanel(){
 function uiPrefs(){
   let raw={};
   try{raw=JSON.parse(localStorage.getItem('liber-ui')||'{}');}catch{}
-  return {toolDisplay:'product',collapseThinking:false,hideDiffs:false,hideTimeline:false,scale:1,chatFont:'',density:'comfortable',...raw};
+  return {toolDisplay:'product',collapseThinking:false,hideDiffs:false,hideTimeline:false,scale:1,chatFont:'',density:'comfortable',notifyDone:true,...raw};
 }
 function setUiPrefs(patch){
   const next={...uiPrefs(),...patch};

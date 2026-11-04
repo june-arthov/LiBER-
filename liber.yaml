@@ -36,6 +36,7 @@ agent:
     retry_base_ms: 700
     # price_in_per_1k: 0.0  # set both to surface a cost_estimate in turn telemetry
     # price_out_per_1k: 0.0
+    fallback_models: ["glm-5.3-flash"]
 
 limits:
   max_cost_per_day: 1
