@@ -67,6 +67,7 @@ if (-not $SkipNode) {
 # 4. the launcher and uninstaller travel with the payload
 Copy-Item (Join-Path $PSScriptRoot 'launch.ps1') $Out -Force
 Copy-Item (Join-Path $PSScriptRoot 'uninstall.ps1') $Out -Force
+Copy-Item (Join-Path $PSScriptRoot 'stop-daemon.ps1') $Out -Force
 
 # 5. report
 $bytes = (Get-ChildItem $Out -Recurse -File | Measure-Object -Property Length -Sum).Sum

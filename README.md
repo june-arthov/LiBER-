@@ -106,34 +106,45 @@ If `liber` is still "not recognized", npm's global prefix is not on PATH —
 `sudo npm link`, or skip linking entirely and run `node bin/liber`.
 TUI dependencies by hand: `python3 -m pip install --user textual httpx`.
 
-### Option C — Windows installer (Program Files, with a wizard)
+### Option C — Windows installer (one file, Program Files)
 
-From a source checkout, stage the payload once and then run the wizard:
+Build the installer once, then double-click it:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\build.ps1   # bundles the app + Node runtime
-installer\LiBER-Setup.cmd                                      # double-click works too
+powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1
+# -> installer\dist\LiBER-Setup-0.5.5.exe   (1.4 MB, or ~99 MB with the Node runtime)
 ```
 
-The wizard asks for an install folder (default `C:\Program Files\LiBER`) and a
-data folder (default `%LOCALAPPDATA%\LiBER`), then:
+`build-installer.ps1` stages the payload (app, dependencies, desktop shell, skills),
+then compiles a normal Windows setup with [NSIS](https://nsis.sourceforge.io/)
+(`winget install NSIS.NSIS`). Add `-SkipNode` to leave the interpreter out, or
+`-RequestLevel user` for a build that installs without a UAC prompt.
 
-- copies the app, its dependencies and the desktop shell into Program Files,
-- keeps **your data** — sessions, memory, vault, logs, `.env` — in your own profile,
-  so a read-only program directory never blocks the agent,
-- creates Start Menu and desktop shortcuts that start the daemon and then the window,
-- registers **Apps & features** → uninstall (or run `uninstall.ps1` directly),
+The wizard asks only for a folder — `C:\Program Files\LiBER` by default — and
+then:
+
+- installs the app under `Program Files\LiBER\app`, with the launcher and
+  uninstaller beside it,
+- keeps **your data** — sessions, memory, vault, logs, `.env` —
+  in `%LOCALAPPDATA%\LiBER`, so a read-only program directory never blocks the agent,
+- creates a Start Menu entry and an optional desktop shortcut that start the daemon
+  and then the window,
+- registers an uninstaller in **Apps & features** (`LiBER`), which stops the daemon
+  and leaves your data in place,
 - offers to launch LiBER when it finishes.
 
-Silent install, for a script or a lab machine:
+Silent install (scripts, lab machines):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\LiBER-Setup.ps1 -Silent `
-  -InstallDir "C:\Program Files\LiBER" -DataDir "$env:LOCALAPPDATA\LiBER" -NoLaunch
+installer\dist\LiBER-Setup-0.5.5.exe /S
 ```
 
-`build.ps1 -SkipNode` leaves the 90 MB Node runtime out of the payload — the
-launcher then uses whatever `node` is on PATH, and says so if there is none.
+Two notes worth knowing:
+
+- the uninstall entry is written under **HKCU** so it exists whether or not the
+  install was elevated (a per-user entry still appears in Apps & features),
+- `installer\LiBER-Setup.cmd` remains as the PowerShell wizard path: same layout,
+  no compiler needed, useful when NSIS is not installed.
 
 ### 1. Give it a provider key
 
