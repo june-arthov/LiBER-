@@ -20,6 +20,7 @@ const providers = require('./core/providers');
 const budget = require('./core/budget');
 const memoryBank = require('./core/tools/memory-tool');
 const automations = require('./core/automations');
+const vault = require('./core/vault');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -197,6 +198,11 @@ class LiberDaemon {
       });
 
       this.seedStandingFacts(config);
+      // Plaintext provider keys move into the encrypted vault on first boot.
+      try {
+        const mv = vault.migrateCredentials();
+        if (mv.moved?.length) logger.info('SYSTEM', 'VAULT_MIGRATED_KEYS', { count: mv.moved.length });
+      } catch (e) { logger.warn('SYSTEM', 'VAULT_MIGRATION_FAILED', { error: e.message }); }
       this.startAutomations();
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
       // Bind to loopback by default: the daemon has no auth, so exposing it on the LAN
@@ -723,6 +729,36 @@ class LiberDaemon {
         memory.clear(id);
         for (const m of history) memory.add(id, m.role, m.content);
         res.end(JSON.stringify({ success: true, dropped, remaining: memory.get(id).length }));
+      }
+      else if (endpoint === '/vault' || endpoint === '/vault/migrate') {
+        const readBody = async () => { let b = ''; for await (const ch of req) b += ch; return JSON.parse(b || '{}'); };
+        if (endpoint === '/vault' && req.method === 'GET') {
+          res.end(JSON.stringify({ success: true, entries: vault.list(), status: vault.status() }));
+          return;
+        }
+        if (endpoint === '/vault' && req.method === 'POST') {
+          const body = await readBody();
+          // A value goes in and never comes back out through this route.
+          const out = vault.set(body.name, body.value, body.meta || {});
+          res.statusCode = out.ok ? 200 : 400;
+          res.end(JSON.stringify({ success: out.ok, ...out, entries: vault.list() }));
+          return;
+        }
+        if (endpoint === '/vault' && req.method === 'DELETE') {
+          const out = vault.remove(String(url.searchParams.get('name') || ''));
+          res.statusCode = out.ok ? 200 : 404;
+          res.end(JSON.stringify({ success: out.ok, ...out, entries: vault.list() }));
+          return;
+        }
+        if (endpoint === '/vault/migrate') {
+          const out = vault.migrateCredentials();
+          logger.info('SYSTEM', 'VAULT_MIGRATION', { moved: out.moved });
+          res.end(JSON.stringify({ success: out.ok, ...out, entries: vault.list() }));
+          return;
+        }
+        res.statusCode = 405;
+        res.end(JSON.stringify({ success: false, error: 'Method not allowed.' }));
+        return;
       }
       else if (endpoint === '/automations' || endpoint === '/automations/update' || endpoint === '/automations/run') {
         const readBody = async () => { let b = ''; for await (const ch of req) b += ch; return JSON.parse(b || '{}'); };

@@ -1,6 +1,7 @@
 // src/daemon/core/tools/terminal-tool.js — Liber Terminal Execution Engine
 const { exec } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 const policy = require('../policy');
 
 // Destructive patterns that strictly require Human-In-The-Loop approval
@@ -220,6 +221,67 @@ function evaluatePolicy(command, opts = {}) {
   return { denied: false };
 }
 
+/**
+ * Sandbox profile.
+ *
+ * This is not a container. On Windows it runs the command in PowerShell
+ * Constrained Language Mode, which refuses the .NET/COM surface that most
+ * script-based escapes need ([System.IO.File]::WriteAllText, Add-Type,
+ * reflection), and it hands the child a minimal environment so provider keys and
+ * tokens are not inherited. With the prefix policy and a fixed cwd, that removes
+ * the easiest ways a command walks out of the workspace.
+ */
+function sandboxPolicy() {
+  const term = policy.terminalConfig();
+  const requested = term.sandbox !== false;
+  const supported = process.platform === 'win32';
+  return { on: requested && supported, requested, supported };
+}
+
+/** Minimal environment: nothing secret is inherited by the child. */
+function sandboxEnv() {
+  const keep = ['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP',
+    'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
+    'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS'];
+  const env = {};
+  for (const k of keep) if (process.env[k] !== undefined) env[k] = process.env[k];
+  return env;
+}
+
+function auditTerminal(entry) {
+  try {
+    const dir = path.resolve(process.cwd(), '.liber');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'terminal-audit.log'),
+      new Date().toISOString() + ' ' + JSON.stringify(entry) + '\n', 'utf8');
+  } catch { /* auditing must never block a command */ }
+}
+
+/**
+ * Run under Constrained Language Mode via a throwaway script file. A file avoids
+ * every quoting trap that inline -Command has with quotes and $ signs.
+ */
+function runSandboxed(command, { cwd, timeout }) {
+  const { execFile } = require('child_process');
+  const tmpDir = path.resolve(process.cwd(), '.liber', 'tmp');
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const script = path.join(tmpDir, 'run-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6) + '.ps1');
+  fs.writeFileSync(script,
+    "$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'\n" +
+    "$ErrorActionPreference = 'Continue'\n" +
+    command + '\n', 'utf8');
+
+  return new Promise((resolve) => {
+    execFile('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+      { cwd, timeout, maxBuffer: 10 * 1024 * 1024, windowsHide: true, env: sandboxEnv() },
+      (error, stdout, stderr) => {
+        try { fs.unlinkSync(script); } catch { }
+        resolve({ error, stdout: String(stdout || ''), stderr: String(stderr || '') });
+      });
+  });
+}
+
 async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, meta = {}) {
   if (!command || typeof command !== 'string') {
     return { error: "Missing or invalid command argument." };
@@ -241,6 +303,54 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
   const startTime = Date.now();
   const isWindows = process.platform === 'win32';
   const shellOption = isWindows ? 'powershell.exe' : '/bin/bash';
+  const sandbox = sandboxPolicy();
+  auditTerminal({ decision: 'allow', command, cwd, sandbox: sandbox.on ? 'constrained-language' : 'none' });
+
+  const finish = (error, stdout, stderr) => {
+    const durationMs = Date.now() - startTime;
+    const outStr = String(stdout || '').trim();
+    const errStr = String(stderr || '').trim();
+    const MAX_OUTPUT = 15000;
+    let truncated = false;
+    let finalOut = outStr;
+    if (finalOut.length > MAX_OUTPUT) {
+      finalOut = finalOut.slice(0, MAX_OUTPUT) + `\n... [TRUNCATED: Output exceeded ${MAX_OUTPUT} characters]`;
+      truncated = true;
+    }
+    const exitCode = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+    auditTerminal({ decision: 'run', command, exit_code: exitCode, duration_ms: durationMs, sandbox: sandbox.on ? 'constrained-language' : 'none' });
+    if (error) {
+      return {
+        command,
+        exit_code: exitCode,
+        output: finalOut,
+        error: errStr || error.message,
+        duration_ms: durationMs,
+        truncated,
+        sandboxed: sandbox.on
+      };
+    }
+    // stderr is not noise: a blocked call explains itself there and nowhere else
+    const withErr = errStr
+      ? (finalOut ? finalOut + "\n[stderr] " + errStr : "[stderr] " + errStr)
+      : finalOut;
+    return {
+      command,
+      exit_code: 0,
+      output: withErr || '(command succeeded with no output)',
+      duration_ms: durationMs,
+      truncated,
+      sandboxed: sandbox.on
+    };
+  };
+
+  if (sandbox.on) {
+    const { error, stdout, stderr } = await runSandboxed(command, {
+      cwd,
+      timeout: parseInt(timeout, 10) || 45000
+    });
+    return finish(error, stdout, stderr);
+  }
 
   return new Promise((resolve) => {
     exec(
@@ -252,40 +362,7 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
         shell: shellOption,
         windowsHide: true
       },
-      (error, stdout, stderr) => {
-        const durationMs = Date.now() - startTime;
-        const outStr = (stdout || '').trim();
-        const errStr = (stderr || '').trim();
-
-        // Safe truncation to avoid blowing LLM context (cap at 15,000 characters)
-        const MAX_OUTPUT = 15000;
-        let truncated = false;
-        let finalOut = outStr;
-
-        if (finalOut.length > MAX_OUTPUT) {
-          finalOut = finalOut.slice(0, MAX_OUTPUT) + `\n... [TRUNCATED: Output exceeded ${MAX_OUTPUT} characters]`;
-          truncated = true;
-        }
-
-        if (error) {
-          resolve({
-            command,
-            exit_code: error.code || 1,
-            output: finalOut,
-            error: errStr || error.message,
-            duration_ms: durationMs,
-            truncated
-          });
-        } else {
-          resolve({
-            command,
-            exit_code: 0,
-            output: finalOut || (errStr ? `[stderr] ${errStr}` : '(command succeeded with no output)'),
-            duration_ms: durationMs,
-            truncated
-          });
-        }
-      }
+      (error, stdout, stderr) => resolve(finish(error, stdout, stderr))
     );
   });
 }
@@ -293,5 +370,7 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
 module.exports = {
   runTerminal,
   isCommandSensitive,
-  evaluatePolicy
+  evaluatePolicy,
+  sandboxPolicy,
+  sandboxEnv
 };

@@ -159,6 +159,41 @@ class ToolRegistry {
       handler: fetchUrl
     });
 
+    // 8c. vault — secrets the agent can use without ever printing them
+    this.register({
+      name: 'vault',
+      description: 'Encrypted secret store. list: names and last-4 hints only · set: store a secret · get: read one back (disabled unless the operator allows it) · remove: delete. Prefer storing a key here over pasting it into a command line.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['list', 'set', 'get', 'remove'], description: 'list | set | get | remove' },
+          name: { type: 'string', description: 'Secret name, e.g. github.token' },
+          value: { type: 'string', description: 'Secret value (action set)' }
+        },
+        required: ['action']
+      },
+      handler: async (args) => {
+        const vault = require('./vault');
+        const action = String(args.action || '').toLowerCase();
+        if (action === 'list') return { entries: vault.list(), status: vault.status() };
+        if (action === 'set') return vault.set(args.name, args.value);
+        if (action === 'remove') return vault.remove(args.name);
+        if (action === 'get') {
+          // Reading a secret back into the model is an operator decision: a key in
+          // the transcript can be exfiltrated by any later prompt injection.
+          const allowed = process.env.LIBER_VAULT_AGENT_READ === '1';
+          if (!allowed) {
+            return { error: 'Reading secrets back is disabled. The operator can enable it with LIBER_VAULT_AGENT_READ=1 or by wiring the value into a connector that uses it server-side.', entries: vault.list() };
+          }
+          const value = vault.get(args.name);
+          return value === null
+            ? { error: "No secret named '" + args.name + "'." }
+            : { name: args.name, value };
+        }
+        return { error: "Unknown vault action '" + action + "'." };
+      }
+    });
+
     // 8b. browser — a real Chromium for pages that need JS, clicks or typing
     this.register({
       name: 'browser',

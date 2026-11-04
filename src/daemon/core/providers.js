@@ -4,6 +4,7 @@
 // secret to a client: status() reports presence, source and a last-4 hint only.
 const fs = require('fs');
 const path = require('path');
+const vault = require('./vault');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
@@ -227,15 +228,15 @@ function setCustom({ label, base, api_key, adapter }) {
 function resolveStored(providerId, endpoint) {
   const store = readStore();
   const direct = store.providers[providerId];
-  if (direct?.api_key) return direct.api_key;
-  if (direct?.access_token) return direct.access_token;
+  if (direct?.api_key) return vault.resolveRef(direct.api_key);
+  if (direct?.access_token) return vault.resolveRef(direct.access_token);
   const ep = String(endpoint || '').toLowerCase();
   if (ep) {
     for (const [id, p] of Object.entries(store.providers)) {
       const base = String(p.base || (entryFor(id) || {}).base || '').toLowerCase();
       if (base && ep.startsWith(base.replace(/\/$/, ''))) {
-        if (p.api_key) return p.api_key;
-        if (p.access_token) return p.access_token;
+        if (p.api_key) return vault.resolveRef(p.api_key);
+        if (p.access_token) return vault.resolveRef(p.access_token);
       }
     }
   }
@@ -246,8 +247,8 @@ function resolveStored(providerId, endpoint) {
 function resolve(providerId, endpoint) {
   const store = readStore();
   const direct = store.providers[providerId];
-  if (direct?.api_key) return direct.api_key;
-  if (direct?.access_token) return direct.access_token;
+  if (direct?.api_key) return vault.resolveRef(direct.api_key);
+  if (direct?.access_token) return vault.resolveRef(direct.access_token);
 
   // endpoint match (custom endpoints and shared bases)
   const ep = String(endpoint || '').toLowerCase();
@@ -255,8 +256,8 @@ function resolve(providerId, endpoint) {
     for (const [id, p] of Object.entries(store.providers)) {
       const base = String(p.base || (entryFor(id) || {}).base || '').toLowerCase();
       if (base && ep.startsWith(base.replace(/\/$/, ''))) {
-        if (p.api_key) return p.api_key;
-        if (p.access_token) return p.access_token;
+        if (p.api_key) return vault.resolveRef(p.api_key);
+        if (p.access_token) return vault.resolveRef(p.access_token);
       }
     }
     // registry entry whose base matches the endpoint (Groq/DeepSeek/… env)

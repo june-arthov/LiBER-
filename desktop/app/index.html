@@ -2854,7 +2854,7 @@ const NAV2=[
   {id:'workspace',label:'Workspace',icon:'▣'},
   {id:'safety',label:'Safety',icon:'⛨'},
   {id:'browser',label:'Browser',icon:'◎'},
-  {id:'vault',label:'Passwords & Logins',icon:'⚿'},
+  {id:'vault',label:'Vault & Secrets',icon:'⚿'},
   {id:'memory',label:'Memory & Context',icon:'◇'},
   {id:'voice',label:'Voice',icon:'◍'},
   {id:'advanced',label:'Advanced',icon:'⚙'},
@@ -3389,10 +3389,59 @@ async function renderPanel(){
     return;
   }
 
+  if(cat==='vault'){
+    p.innerHTML=`<h3>Vault &amp; Secrets</h3>
+      <div class="pd">API keys and tokens, encrypted at rest with AES-256-GCM. The key file sits beside the vault, so this protects a leaked file, a synced folder or a backup — not someone who already reads your whole profile.</div>
+      <div class="dsec">Stored secrets</div>
+      <div id="vt-list" class="pmeta" style="padding:0 0 10px">reading…</div>
+      <div class="f"><label>Add or replace</label><div class="c">
+        <input type="text" id="vt-name" placeholder="name, e.g. github.token" autocomplete="off">
+        <input type="password" id="vt-value" placeholder="value — stored encrypted, never shown again" autocomplete="new-password" style="margin-top:6px">
+        <div class="hint">Listing shows only the last four characters. The agent can list, add and delete; reading a value back into a prompt is disabled by default.</div>
+      </div></div>
+      <div class="brow" style="gap:6px;flex-wrap:wrap"><button class="btn primary" id="vt-save">Save secret</button><button class="tinybtn" id="vt-migrate">Encrypt existing provider keys</button></div>`;
+    const list=()=>p.querySelector('#vt-list');
+    const paint=async()=>{
+      list().textContent='reading…';
+      const r=await api('/vault').catch(()=>null);
+      const rows=(r&&r.data&&r.data.entries)||[];
+      list().innerHTML='';
+      if(!rows.length){ list().textContent='No secrets stored yet.'; return; }
+      for(const row of rows){
+        const line=document.createElement('div');
+        line.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:.5px solid var(--border)';
+        line.innerHTML='<span style="font-size:12px">'+esc(row.name)+'</span>'
+          +'<span style="font-size:11px;color:var(--dim)">'+esc(row.hint||'')+'</span>'
+          +'<span style="flex:1"></span>'
+          +'<span style="font-size:10.5px;color:var(--dim)">'+esc((row.updatedAt||'').slice(0,10))+'</span>';
+        const del=document.createElement('button');
+        del.className='tinybtn'; del.textContent='Forget';
+        del.onclick=async()=>{ await api('/vault?name='+encodeURIComponent(row.name),'DELETE'); await paint(); toast('removed '+row.name); };
+        line.appendChild(del);
+        list().appendChild(line);
+      }
+    };
+    p.querySelector('#vt-save').onclick=async()=>{
+      const name=p.querySelector('#vt-name').value.trim();
+      const value=p.querySelector('#vt-value').value;
+      if(!name||!value){ toast('name and value are required'); return; }
+      const r=await api('/vault','POST',{name,value});
+      if(r&&r.data&&r.data.success){ p.querySelector('#vt-name').value=''; p.querySelector('#vt-value').value=''; toast('saved '+name); await paint(); }
+      else toast((r&&r.data&&r.data.error)||'could not save');
+    };
+    p.querySelector('#vt-migrate').onclick=async()=>{
+      const r=await api('/vault/migrate','POST',{});
+      const moved=(r&&r.data&&r.data.moved)||[];
+      toast(moved.length?('encrypted '+moved.length+' key(s)'):'nothing to encrypt');
+      await paint();
+    };
+    await paint();
+    return;
+  }
+
   /* ── HONEST STUBS ──────────────────────── */
   const STUBS={
-    browser:['Browser','A built-in browser and browser subagent do not exist in this daemon; fetch_url and web_search are the only network tools.'],
-    vault:['Passwords &amp; Logins','There is no credential vault here. Provider keys come from .env and are never read back by the agent.'],
+    browser:['Browser','The agent drives a real headless Chromium (open, click, type, extract, screenshot) — but there is no in-app browser pane you can watch, and no browser subagent.'],
     voice:['Voice','No speech-to-text or text-to-speech pipeline is wired into LiBER.'],
 
     billing:['Billing','LiBER runs on your own API keys. There is no metering, credit balance or plan — limits are enforced locally in the Advanced page.'],
