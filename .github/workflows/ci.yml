@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# A push to main and its tag used to start two identical runs; if the runner
+# queue is slow they pile up and both sit at the front. One run per ref is enough.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
