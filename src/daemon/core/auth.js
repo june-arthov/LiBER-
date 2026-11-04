@@ -183,15 +183,41 @@ function rotate(id) {
 }
 
 /* ── legacy helpers, kept so existing callers keep working ────────────────── */
-function readToken() {
-  if (process.env.LIBER_TOKEN) return process.env.LIBER_TOKEN.trim();
+/** Machine-level copy, so a globally installed CLI can reach this daemon. */
+const machineTokenPath = () => path.join(require('os').homedir(), '.liber', 'daemon.token');
+
+/** Copy the workspace token to the machine path (0600), best effort. */
+function publishMachineToken(token = readWorkspaceToken()) {
+  if (!token) return null;
+  try {
+    const file = machineTokenPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, token, { encoding: 'utf8', mode: 0o600 });
+    return file;
+  } catch { return null; }
+}
+
+function readWorkspaceToken() {
   try { return fs.readFileSync(tokenPath(), 'utf8').trim() || null; } catch { return null; }
 }
+
+function readToken() {
+  if (process.env.LIBER_TOKEN) return process.env.LIBER_TOKEN.trim();
+  // Workspace first (a daemon per project), then the machine copy written by
+  // `liber spawn` — without the fallback, a globally installed CLI run in a
+  // fresh directory gets a bare 401 with no hint of what to do.
+  const local = readWorkspaceToken();
+  if (local) return local;
+  try { return fs.readFileSync(machineTokenPath(), 'utf8').trim() || null; } catch { return null; }
+}
 function ensureToken() {
-  const existing = readToken();
+  // The daemon must create its *workspace* token. Using readToken() here would
+  // adopt the machine-level copy and never write .liber/daemon.token, so two
+  // workspaces would end up sharing one token.
+  const existing = readWorkspaceToken();
   if (existing) return existing;
   const token = crypto.randomBytes(32).toString('hex');
-  fs.mkdirSync(DIR(), { recursive: true });
+  fs.mkdirSync(path.dirname(tokenPath()), { recursive: true });
   fs.writeFileSync(tokenPath(), token, { encoding: 'utf8', mode: 0o600 });
   return token;
 }
@@ -213,5 +239,5 @@ function isAuthorized(req, expected) {
 module.exports = {
   bootstrap, verify, touch, rateLimit, can, scopeFor, audit, create, list, revoke, rotate, hash,
   SCOPES, DEFAULT_LIMIT, FILE, AUDIT,
-  tokenPath, readToken, ensureToken, extract, safeEqual, isAuthorized
+  tokenPath, machineTokenPath, readToken, readWorkspaceToken, publishMachineToken, ensureToken, extract, safeEqual, isAuthorized
 };

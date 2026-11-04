@@ -225,10 +225,26 @@ async function getPrimaryAgent() {
   return 'dev-bot';
 }
 
+// A bare 401 from a directory without a token is the most common first-run
+// confusion, so say what to do instead of repeating the server sentence.
+function authHint(message = '') {
+  if (!/unauthori[sz]ed/i.test(String(message))) return '';
+  const token = auth.readToken();
+  return [
+    '',
+    '  No daemon token usable from this directory.',
+    '    • start a daemon here:            liber spawn',
+    '    • the token lives in:             .liber/daemon.token (workspace)',
+    '                                      ~/.liber/daemon.token (machine copy)',
+    '    • or point at another daemon:     set LIBER_TOKEN=<token>',
+    token ? '' : '    • nothing was found in either place just now.'
+  ].filter(Boolean).join('\n');
+}
+
 // Render formatted status table
 async function formatStatusTable() {
   const res = await requestDaemon('/ps');
-  if (!res.success) throw new Error(res.error);
+  if (!res.success) throw new Error(res.error + authHint(res.error));
 
   const lines = [];
   lines.push('');

@@ -57,89 +57,151 @@ LiBER agents are equipped with a first-class toolset:
 
 ## 🚀 Quick Start
 
-### Install from npm
+### Requirements
+
+| Need | Version | For |
+|---|---|---|
+| **Node.js** | 18+ (20 recommended) | the CLI, the daemon, every tool |
+| **npm** | ships with Node | install and global link |
+| **Git** | any | source install, workspace/git panels |
+| Python 3.10+ | optional | the `liber tui` dashboard (textual + httpx) |
+| Docker | optional | the container sandbox; without it commands run in Constrained Language Mode |
+| Chrome or Edge | optional | the `browser` tool (launched headless on demand) |
+
+### Option A — install from npm (fastest)
 
 ```bash
 npm i -g @arthovlabs/liber
-liber --version
+liber --version          # prints the installed version
 ```
 
-Both commands are installed: `liber` (CLI / TUI) and `liberd` (daemon).
+No global install wanted? `npx @arthovlabs/liber --version` runs it once.
 
-### Or from source
+### Option B — install from GitHub (source)
 
 ```bash
 git clone https://github.com/june-arthov/LiBER-.git
 cd LiBER-
+```
+
+**Linux / macOS / WSL — one command does the lot** (node deps, global link, an
+isolated `.venv` for the Python TUI, and `.env` from the template):
+
+```bash
+bash scripts/setup.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
 npm install
-npm link
+npm link                 # puts `liber` and `liberd` on PATH
+Copy-Item .env.example .env
 ```
 
-> **Linux/WSL: use the full setup script** — it handles the pieces `npm link`
-> needs sudo for, creates an isolated `.venv` for the Python TUI (textual + httpx),
-> and copies `.env` from the template:
->
-> ```bash
-> bash scripts/setup.sh
-> ```
->
-> Manual fallback: `sudo npm link` (or run `node bin/liber` without linking) and
-> `python3 -m pip install --user textual httpx` for the TUI.
+If `liber` is still "not recognized", npm's global prefix is not on PATH —
+`npm config get prefix` prints it, and its bin directory is what needs adding.
 
-*(Optional Python TUI dependencies)*
+**Manual fallback on Linux/WSL** when `npm link` hits `EACCES`:
+`sudo npm link`, or skip linking entirely and run `node bin/liber`.
+TUI dependencies by hand: `python3 -m pip install --user textual httpx`.
+
+### Option C — Windows installer (Program Files, with a wizard)
+
+From a source checkout, stage the payload once and then run the wizard:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\build.ps1   # bundles the app + Node runtime
+installer\LiBER-Setup.cmd                                      # double-click works too
+```
+
+The wizard asks for an install folder (default `C:\Program Files\LiBER`) and a
+data folder (default `%LOCALAPPDATA%\LiBER`), then:
+
+- copies the app, its dependencies and the desktop shell into Program Files,
+- keeps **your data** — sessions, memory, vault, logs, `.env` — in your own profile,
+  so a read-only program directory never blocks the agent,
+- creates Start Menu and desktop shortcuts that start the daemon and then the window,
+- registers **Apps & features** → uninstall (or run `uninstall.ps1` directly),
+- offers to launch LiBER when it finishes.
+
+Silent install, for a script or a lab machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\LiBER-Setup.ps1 -Silent `
+  -InstallDir "C:\Program Files\LiBER" -DataDir "$env:LOCALAPPDATA\LiBER" -NoLaunch
+```
+
+`build.ps1 -SkipNode` leaves the 90 MB Node runtime out of the payload — the
+launcher then uses whatever `node` is on PATH, and says so if there is none.
+
+### 1. Give it a provider key
+
 ```bash
-pip install rich textual httpx
+cp .env.example .env      # Windows: Copy-Item .env.example .env
 ```
 
-### 2. Configuration
+Open `.env` and fill in the key for the provider you use — only one is needed:
 
-Create your local `.env`:
-```bash
-cp .env.example .env
-```
-Add your API key (e.g. Ollama Cloud or OpenAI compatible):
 ```env
-OLLAMA_CLOUD_API_KEY=your_key_here
+OLLAMA_CLOUD_API_KEY=...   # Ollama Cloud (https://ollama.com/v1)
+#OPENAI_API_KEY=sk-...     # any OpenAI-compatible vendor
+#ANTHROPIC_API_KEY=sk-ant-...
+#GEMINI_API_KEY=AIza...
 ```
 
-### 3. Usage
+Keys can also be stored in the encrypted vault and managed from the desktop shell
+(Settings → Providers / Vault & Secrets); a stored key wins over the environment.
 
-#### Start the Background Daemon
-```powershell
-liber spawn
-```
+### 2. Start the daemon and prove it works
 
-#### Launch Interactive LiBER Terminal
-```powershell
-liber
-```
-*Available slash commands inside the terminal: `/help`, `/status`, `/tools`, `/model`, `/logs`, `/clear`, `/tui`, `/exit`.*
-
-#### Launch Tactical Cyber-Obsidian TUI Dashboard
-```powershell
-liber tui
-```
-*Or directly via Python:*
-```powershell
-python bin/liber-tui.py
+```bash
+liber spawn            # background daemon on 127.0.0.1:4567
+liber ps               # fleet status — this must answer, not hang
+liber chat dev-bot "reply with exactly: ready"
 ```
 
-#### One-Shot CLI Execution
-```powershell
-liber chat dev-bot "audit project directory and verify package.json"
+The last command is the real smoke test: a turn goes through the model, the
+grounding gate, and comes back with receipts.
+
+### 3. Pick a surface
+
+```bash
+liber                  # interactive CLI
+liber tui              # Textual dashboard (needs the Python deps)
+liber desktop          # LiBER.exe shell — source install only: the npm package
+                       # ships the runtime, not desktop/ (build: cd desktop && npx neu build)
 ```
 
-#### Manage Fleet
-```powershell
-liber ps          # Check agent fleet status and uptime
-liber logs -n 25  # View structured telemetry stream
-liber skills      # List procedural skills (liber skills <name> to print one)
-liber resume      # Continue an interrupted turn from .liber/turns/
-liber reset       # Clear the persisted conversation window
-liber bench       # Run the 8-case model-compliance benchmark (grounded, honesty, tools)
-liber desktop     # Launch the LiBER desktop shell (LiBER.exe — OpenCode-style UI)
-liber stop        # Gracefully shutdown daemon
+All of them talk to the same daemon, so memory, sessions, budget and the audit
+logs are shared.
+
+### Command reference
+
+```bash
+liber spawn                 # start the daemon in the background
+liber stop                  # shut it down gracefully
+liber ps                    # agents, uptime, telemetry
+liber chat dev-bot "..."    # one-shot turn
+liber models                # list models from the live endpoint
+liber model <name>          # switch the active model
+liber logs -n 25            # structured telemetry stream
+liber skills [name]         # list or print a procedural skill
+liber resume [agentId]      # continue an interrupted turn
+liber reset                 # clear the persisted conversation window
+liber bench                 # run the model-compliance benchmark
 ```
+
+### If something goes wrong
+
+| Symptom | Cause and fix |
+|---|---|
+| `liber: command not found` | npm's global prefix is not on PATH — `npm config get prefix`, add its bin dir |
+| `EACCES` during `npm link` (Linux/WSL) | system node dir — `sudo npm link`, or run `node bin/liber` |
+| `liber ps` hangs or refuses | the daemon is not running — `liber spawn`; the token it writes is `.liber/daemon.token` |
+| `401` from a turn | no provider key resolved — check `.env`, or store it in the vault |
+| `liber tui` exits immediately | Python deps missing — `pip install textual httpx` |
+| Container backend silently absent | Docker daemon down — `GET /sandbox` says so, and commands fall back to Constrained Language Mode |
 
 ---
 
@@ -173,7 +235,7 @@ the cited receipt actually entails it. It is still not a proof system: the seman
 subtle unsupported claims or flag supported ones, and a verifier outage fails open (recorded as
 `semantic: error`, never silently as `pass`).
 
-Run the enforcement suite with `npm test` (242 tests: a scripted model that hallucinates, gets
+Run the enforcement suite with `npm test` (296 cases at the time of writing: a scripted model that hallucinates, gets
 blocked, and is forced to read the file before answering; a 15-case grounding regression dataset;
 the terminal policy incl. per-stage pipeline evaluation; the approval-channel wiring; the budget
 guard; and the git/workspace surface). CI runs the suite on Linux and Windows via

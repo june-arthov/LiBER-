@@ -195,6 +195,9 @@ class LiberDaemon {
       llmManager.initialize(config.agent.engine);
       policy.configure(config.policy || {});
       this.token = auth.ensureToken();
+      // A globally installed CLI may be run from any directory; give it a way to
+      // find this daemon without hunting for the workspace token.
+      auth.publishMachineToken(this.token);
 
       this.maxLoops = config.limits?.circuit_breaker?.max_loops || 12;
       if (config.memory?.persist !== false) {

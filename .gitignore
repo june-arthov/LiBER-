@@ -40,3 +40,6 @@ desktop/bin/
 # Research / review scratch (extracted reference sources, screenshots)
 .tmp-review/
 .dsh-research/
+
+# installer staging output
+installer/payload/
