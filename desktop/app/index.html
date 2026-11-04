@@ -2706,7 +2706,121 @@ $('ov-close').onclick=closeOverview;
 $('new-conv').onclick=newConversation;
 $('nav-settings').onclick=openDrawer;
 $('nav-skills').onclick=()=>{openOverview('skills');};
-$('nav-automations').onclick=()=>toast('Automations are not implemented in this build (no scheduler in the daemon).');
+/* ── Automations: scheduled prompts that run while you are elsewhere ───── */
+function ensureAutomationsModal(){
+  let el=document.getElementById('auto-modal');
+  if(el) return el;
+  el=document.createElement('div');
+  el.id='auto-modal';
+  el.style.cssText='position:fixed;inset:0;z-index:520;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55)';
+  el.innerHTML='<div class="auto-card" style="width:min(640px,92vw);max-height:82vh;overflow:auto;background:var(--panel);border:.5px solid var(--border-strong);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.7)">'
+    +'<div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:.5px solid var(--border)">'
+      +'<b style="font-size:13px">Automations</b><span class="grow" style="flex:1"></span><button class="tinybtn" id="auto-close">✕</button></div>'
+    +'<div id="auto-body" style="padding:12px 14px 14px"></div></div>';
+  document.body.appendChild(el);
+  el.addEventListener('click',e=>{ if(e.target===el) closeAutomations(); });
+  el.querySelector('#auto-close').onclick=closeAutomations;
+  return el;
+}
+function closeAutomations(){ const el=document.getElementById('auto-modal'); if(el) el.style.display='none'; }
+
+async function openAutomations(){
+  const el=ensureAutomationsModal();
+  el.style.display='flex';
+  await paintAutomations();
+}
+
+async function paintAutomations(){
+  const body=document.getElementById('auto-body');
+  if(!body) return;
+  body.innerHTML='<div style="color:var(--dim);font-size:12px">reading…</div>';
+  const r=await api('/automations').catch(()=>null);
+  const jobs=(r&&r.data&&r.data.jobs)||[];
+  body.innerHTML='';
+
+  const intro=document.createElement('div');
+  intro.style.cssText='color:var(--dim);font-size:12px;line-height:18px;margin-bottom:10px';
+  intro.textContent='A prompt that runs on a schedule in its own session. Same engine, same grounding gate and the same terminal policy as a manual turn — it just does not need you to press Enter.';
+  body.appendChild(intro);
+
+  if(!jobs.length){
+    const empty=document.createElement('div');
+    empty.style.cssText='color:var(--dim);font-size:12px;padding:6px 0 10px';
+    empty.textContent='No automations yet.';
+    body.appendChild(empty);
+  }
+
+  for(const j of jobs){
+    const row=document.createElement('div');
+    row.style.cssText='border:.5px solid var(--border);border-radius:10px;padding:9px 11px;margin-bottom:8px';
+    const when=j.schedule.type==='daily'?('daily at '+j.schedule.at):('every '+j.schedule.minutes+' min');
+    const last=j.lastResult?((j.lastResult.ok?'✓ ':'✖ ')+(j.lastResult.excerpt||j.lastResult.error||'')).slice(0,110):'never run';
+    row.innerHTML='<div style="display:flex;gap:8px;align-items:baseline">'
+      +'<b style="font-size:12.5px">'+esc(j.name)+'</b>'
+      +'<span style="font-size:11px;color:var(--dim)">'+esc(when)+'</span>'
+      +'<span style="flex:1"></span>'
+      +'<span style="font-size:11px;color:'+(j.enabled?'var(--green)':'var(--dim)')+'">'+(j.enabled?'on':'off')+'</span></div>'
+      +'<div style="font-size:11.5px;color:var(--muted);margin:3px 0 6px">'+esc((j.prompt||'').slice(0,160))+'</div>'
+      +'<div style="font-size:11px;color:var(--dim);margin-bottom:7px">last: '+esc(last)+' · runs: '+j.runCount+'</div>';
+
+    const acts=document.createElement('div');
+    acts.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+    const mk=(label,fn,primary)=>{
+      const b=document.createElement('button');
+      b.className=primary?'btn primary':'tinybtn';
+      b.textContent=label;
+      b.onclick=fn;
+      acts.appendChild(b);
+      return b;
+    };
+    mk('Run now',async()=>{ 
+      const rr=await api('/automations/run','POST',{id:j.id});
+      toast(rr&&rr.data&&rr.data.success?'ran · '+String(rr.data.response||'').slice(0,60):'run failed');
+      await paintAutomations();
+      loadProjects().catch(()=>{});
+    },true);
+    mk(j.enabled?'Disable':'Enable',async()=>{ await api('/automations/update','POST',{id:j.id,patch:{enabled:!j.enabled}}); await paintAutomations(); });
+    mk('Delete',async()=>{ await api('/automations?id='+encodeURIComponent(j.id),'DELETE'); await paintAutomations(); });
+    row.appendChild(acts);
+    body.appendChild(row);
+  }
+
+  const sep=document.createElement('div');
+  sep.style.cssText='border-top:.5px solid var(--border);margin:12px 0 10px';
+  body.appendChild(sep);
+
+  const form=document.createElement('div');
+  form.innerHTML='<div style="font-size:12px;font-weight:600;margin-bottom:6px">New automation</div>'
+    +'<input id="auto-name" placeholder="name, e.g. morning repo check" style="width:100%;margin-bottom:6px;background:rgba(255,255,255,.04);border:.5px solid var(--border-strong);border-radius:8px;padding:6px 9px;color:var(--text);font-size:12px">'
+    +'<textarea id="auto-prompt" rows="2" placeholder="prompt the agent runs, e.g. check git status and tell me if anything needs attention" style="width:100%;margin-bottom:6px;background:rgba(255,255,255,.04);border:.5px solid var(--border-strong);border-radius:8px;padding:6px 9px;color:var(--text);font-size:12px;resize:vertical"></textarea>'
+    +'<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">'
+      +'<select id="auto-type" style="background:rgba(255,255,255,.04);border:.5px solid var(--border-strong);border-radius:8px;padding:5px 8px;color:var(--text);font-size:12px"><option value="interval">every N minutes</option><option value="daily">daily at</option></select>'
+      +'<input id="auto-every" type="number" min="1" value="60" style="width:80px;background:rgba(255,255,255,.04);border:.5px solid var(--border-strong);border-radius:8px;padding:5px 8px;color:var(--text);font-size:12px">'
+      +'<input id="auto-at" type="time" value="09:00" style="display:none;background:rgba(255,255,255,.04);border:.5px solid var(--border-strong);border-radius:8px;padding:5px 8px;color:var(--text);font-size:12px">'
+      +'<button class="btn primary" id="auto-create">Create</button>'
+    +'</div>';
+  body.appendChild(form);
+  form.querySelector('#auto-type').onchange=e=>{
+    const daily=e.target.value==='daily';
+    form.querySelector('#auto-every').style.display=daily?'none':'';
+    form.querySelector('#auto-at').style.display=daily?'':'none';
+  };
+  form.querySelector('#auto-create').onclick=async()=>{
+    const name=form.querySelector('#auto-name').value.trim()||'Automation';
+    const prompt=form.querySelector('#auto-prompt').value.trim();
+    if(!prompt){ toast('a prompt is required'); return; }
+    const type=form.querySelector('#auto-type').value;
+    const schedule=type==='daily'
+      ? {type:'daily',at:form.querySelector('#auto-at').value||'09:00'}
+      : {type:'interval',minutes:Number(form.querySelector('#auto-every').value)||60};
+    const rr=await api('/automations','POST',{name,prompt,schedule});
+    if(rr&&rr.data&&rr.data.success){ toast('automation created'); await paintAutomations(); }
+    else toast(rr&&rr.data&&rr.data.error?rr.data.error:'could not create');
+  };
+}
+
+$('nav-automations').onclick=()=>openAutomations();
+
 $('btn-compact').onclick=()=>handleSlash('/compact');
 $('btn-review').onclick=()=>openOverview('review');
 document.querySelectorAll('.ovrow').forEach(r=>r.onclick=()=>openOverview(r.dataset.ov));

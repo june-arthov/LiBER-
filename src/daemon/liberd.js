@@ -19,6 +19,7 @@ const skills = require('./core/skills');
 const providers = require('./core/providers');
 const budget = require('./core/budget');
 const memoryBank = require('./core/tools/memory-tool');
+const automations = require('./core/automations');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -95,6 +96,56 @@ class LiberDaemon {
     }
   }
 
+  /**
+   * One timer for the whole daemon: every 30s, run whatever is due. A job that is
+   * already running is skipped, and markRun() records the run so the next tick
+   * cannot fire it twice.
+   */
+  startAutomations() {
+    if (this._autoTimer || process.env.LIBER_AUTOMATIONS === 'off') return;
+    this._autoRunning = this._autoRunning || new Set();
+    this._autoTimer = setInterval(() => { this.tickAutomations().catch(() => {}); }, 30_000);
+    if (this._autoTimer.unref) this._autoTimer.unref();
+    logger.info('SYSTEM', 'AUTOMATIONS_ARMED', { jobs: automations.list().length });
+  }
+
+  async tickAutomations() {
+    const agentId = Array.from(this.agents.keys())[0];
+    if (!agentId) return;
+    const agent = this.agents.get(agentId);
+    if (agent?.status === 'RUNNING' && this.queue?.busy?.()) { /* a manual turn owns the queue */ }
+    for (const job of automations.list()) {
+      if (!job.due) continue;
+      if (this._autoRunning.has(job.id)) continue;
+      this._autoRunning.add(job.id);
+      try {
+        logger.info('SYSTEM', 'AUTOMATION_FIRE', { id: job.id, name: job.name });
+        const result = await this.queue.run(agentId, () => liberEngine.runTurn({
+          agentId,
+          memoryKey: `${agentId}#auto:${job.id}`,
+          agentConfig: agent.config,
+          userMessage: job.prompt,
+          memory, llmManager,
+          onEvent: () => {},
+          maxLoops: this.maxLoops,
+          waitForHitl: async () => false
+        }));
+        automations.markRun(job.id, {
+          ok: result?.success !== false,
+          chars: String(result?.response || '').length,
+          excerpt: result?.response,
+          error: result?.success === false ? result.error : null
+        });
+        logger.info('SYSTEM', 'AUTOMATION_DONE', { id: job.id, ok: result?.success !== false });
+      } catch (err) {
+        automations.markRun(job.id, { ok: false, error: err.message });
+        logger.warn('SYSTEM', 'AUTOMATION_FAILED', { id: job.id, error: err.message });
+      } finally {
+        this._autoRunning.delete(job.id);
+      }
+    }
+  }
+
   /** Facts a fresh session should not have to discover again. */
   seedStandingFacts(config) {
     try {
@@ -146,6 +197,7 @@ class LiberDaemon {
       });
 
       this.seedStandingFacts(config);
+      this.startAutomations();
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
       // Bind to loopback by default: the daemon has no auth, so exposing it on the LAN
       // would let any device spend the API key or call /shutdown. Override deliberately
@@ -671,6 +723,68 @@ class LiberDaemon {
         memory.clear(id);
         for (const m of history) memory.add(id, m.role, m.content);
         res.end(JSON.stringify({ success: true, dropped, remaining: memory.get(id).length }));
+      }
+      else if (endpoint === '/automations' || endpoint === '/automations/update' || endpoint === '/automations/run') {
+        const readBody = async () => { let b = ''; for await (const ch of req) b += ch; return JSON.parse(b || '{}'); };
+        if (endpoint === '/automations' && req.method === 'GET') {
+          res.end(JSON.stringify({ success: true, jobs: automations.list() }));
+          return;
+        }
+        if (endpoint === '/automations' && req.method === 'POST') {
+          const created = automations.create(await readBody());
+          res.statusCode = created.ok ? 200 : 400;
+          res.end(JSON.stringify({ success: created.ok, ...created, jobs: automations.list() }));
+          return;
+        }
+        if (endpoint === '/automations/update') {
+          const body = await readBody();
+          const out = automations.update(String(body.id || ''), body.patch || body);
+          res.statusCode = out.ok ? 200 : 400;
+          res.end(JSON.stringify({ success: out.ok, ...out, jobs: automations.list() }));
+          return;
+        }
+        if (endpoint === '/automations/run') {
+          const body = await readBody();
+          const id = String(body.id || url.searchParams.get('id') || '');
+          const job = automations.list().find(j => j.id === id);
+          if (!job) { res.statusCode = 404; res.end(JSON.stringify({ success: false, error: 'No such automation.' })); return; }
+          const agentId = Array.from(this.agents.keys())[0];
+          const agent = this.agents.get(agentId);
+          try {
+            const result = await this.queue.run(agentId, () => liberEngine.runTurn({
+              agentId,
+              memoryKey: `${agentId}#auto:${job.id}`,
+              agentConfig: agent.config,
+              userMessage: job.prompt,
+              memory, llmManager,
+              onEvent: () => {},
+              maxLoops: this.maxLoops,
+              waitForHitl: async () => false
+            }));
+            automations.markRun(job.id, {
+              ok: result?.success !== false,
+              chars: String(result?.response || '').length,
+              excerpt: result?.response,
+              error: result?.success === false ? result.error : null
+            });
+            res.end(JSON.stringify({ success: true, response: String(result?.response || '').slice(0, 400), jobs: automations.list() }));
+          } catch (err) {
+            automations.markRun(job.id, { ok: false, error: err.message });
+            res.statusCode = 500;
+            res.end(JSON.stringify({ success: false, error: err.message, jobs: automations.list() }));
+          }
+          return;
+        }
+        if (endpoint === '/automations' && req.method === 'DELETE') {
+          const id = url.searchParams.get('id');
+          const out = automations.remove(String(id || ''));
+          res.statusCode = out.ok ? 200 : 404;
+          res.end(JSON.stringify({ success: out.ok, ...out, jobs: automations.list() }));
+          return;
+        }
+        res.statusCode = 405;
+        res.end(JSON.stringify({ success: false, error: 'Method not allowed.' }));
+        return;
       }
       else if (endpoint === '/memory') {
         // The same store the agent's memory tool writes to, exposed so the

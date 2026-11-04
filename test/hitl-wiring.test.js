@@ -26,7 +26,11 @@ test('every waitForHitl passed by the daemon either asks a human or denies', () 
   assert.ok(calls.length >= 2, `expected several approval wirings, found ${calls.length}`);
 
   for (const call of calls) {
-    const denies = /Promise\.resolve\(false\)/.test(call);
+    // any always-false form counts as a denial: Promise.resolve(false),
+    // `async () => false`, or a synchronous `() => false`
+    const denies = /Promise\.resolve\(false\)/.test(call)
+      || /async\s*\(\)\s*=>\s*false/.test(call)
+      || /\(\)\s*=>\s*false/.test(call);
     const asksHuman = /this\.waitForHitl/.test(call);
     assert.ok(
       denies || asksHuman,
