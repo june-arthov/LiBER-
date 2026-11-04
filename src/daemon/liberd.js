@@ -1125,6 +1125,9 @@ class LiberDaemon {
 
   stop() {
     if (this.server) this.server.close();
+    // a headless browser must not outlive the daemon that started it
+    try { require('./core/tools/browser-tool').close(); } catch { /* not launched */ }
+    if (this._autoTimer) { clearInterval(this._autoTimer); this._autoTimer = null; }
   }
 }
 

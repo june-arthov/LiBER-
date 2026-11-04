@@ -159,6 +159,36 @@ class ToolRegistry {
       handler: fetchUrl
     });
 
+    // 8b. browser — a real Chromium for pages that need JS, clicks or typing
+    this.register({
+      name: 'browser',
+      description: 'Drive a real headless Chromium: open pages, click, type into forms, press keys, read text, take screenshots. Use it when a page needs JavaScript, a login, or interaction — fetch_url only reads static HTML.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['open', 'click', 'type', 'press', 'extract', 'screenshot', 'eval', 'status', 'close'], description: 'open: navigate to url · click: by selector or visible text · type: selector+text · press: key · extract: read text · screenshot: save png · close: shut the browser' },
+          url: { type: 'string', description: 'http(s) URL for action open' },
+          selector: { type: 'string', description: 'CSS selector or the visible text of the element' },
+          text: { type: 'string', description: 'Text to type (action type)' },
+          key: { type: 'string', description: 'enter | tab | escape | arrowup | arrowdown' },
+          expression: { type: 'string', description: 'JavaScript to evaluate (action eval)' },
+          path: { type: 'string', description: 'Where to save a screenshot (optional)' }
+        },
+        required: ['action']
+      },
+      handler: async (args) => {
+        const browserTool = require('./tools/browser-tool');
+        const result = await browserTool.runBrowser(args);
+        // Page text is web data: flag instruction-like content before the model sees it.
+        try {
+          const injection = require('./injection');
+          const probe = JSON.stringify(result || {});
+          if (injection.scan(probe)) return { ...result, untrusted_warning: injection.WARNING };
+        } catch { /* scan is best effort */ }
+        return result;
+      }
+    });
+
     // 9. skill — progressive-disclosure procedure library
     this.register({
       name: 'skill',
