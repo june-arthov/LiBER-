@@ -28,7 +28,11 @@ Unicode true
 Name "LiBER"
 OutFile "dist\LiBER-Setup-${VERSION}.exe"
 InstallDir "$PROGRAMFILES64\LiBER"
-InstallDirRegKey HKCU "Software\LiBER" "InstallDir"
+; No InstallDirRegKey here on purpose. NSIS uses the registry value as $INSTDIR
+; when /D is absent, so a stale key from a one-off test install silently
+; redirects every later silent install (and the Start Menu shortcut) to a
+; directory that may already be deleted. The key is still written for
+; information; it just must never decide where the next install goes.
 RequestExecutionLevel ${REQUESTLEVEL}
 SetCompressor /SOLID lzma
 
