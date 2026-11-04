@@ -783,8 +783,11 @@ body.sidebar-collapsed #caption-new{display:inline-flex}
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 .cbtn .chev{display:none}
-.cbtn#btn-context{width:28px;justify-content:center;border-radius:999px;background:#353638;color:var(--text);padding:0;font-size:15px}
-.cbtn#btn-context:hover{background-color:#3d3e40}
+.cbtn#btn-context{
+  width:34px;height:34px;min-width:34px;justify-content:center;
+  border-radius:999px;background:#2f3033;color:var(--text);padding:0;font-size:17px;line-height:1;
+}
+.cbtn#btn-context:hover{background-color:#3a3b3f}
 .send{
   width:34px;height:34px;min-width:34px;border-radius:999px;border:0;
   background:var(--accent);color:#fff;font-size:15px;font-weight:600;
@@ -799,8 +802,31 @@ body.busy .send{animation:sendPulse 1.6s var(--ease) infinite}
   display:flex;align-items:center;gap:10px;padding:0 14px 8px;
   font-family:var(--sans);font-size:12px;line-height:18px;color:var(--dim);
 }
-.cmeta .br{color:var(--dim);gap:4px}
+/* footer chips are controls, not labels: folder picker and branch switcher */
+.cmeta .br{
+  display:inline-flex;align-items:center;gap:5px;
+  height:22px;padding:0 7px;margin-left:-7px;
+  border:0;border-radius:7px;background:none;color:var(--dim);
+  font-family:inherit;font-size:12px;line-height:18px;cursor:pointer;
+  transition:background-color var(--t-fast) var(--ease),color var(--t-fast) var(--ease);
+}
+.cmeta .br:hover{background:rgba(255,255,255,.07);color:var(--text)}
+.cmeta .br:active{transform:translateY(.5px)}
+.cmeta .br .ico{opacity:.75;font-size:11px}
 .cmeta .br b{color:var(--text);font-weight:500}
+.cmeta .br:hover b{color:var(--text)}
+/* popover rows reused by both footer pickers */
+.pop .prow{
+  display:flex;align-items:center;gap:8px;width:100%;
+  padding:6px 8px;border:0;border-radius:7px;background:none;
+  color:var(--text);font-family:var(--sans);font-size:12.5px;text-align:left;cursor:pointer;
+}
+.pop .prow:hover{background:rgba(255,255,255,.07)}
+.pop .prow.sel{box-shadow:inset 2px 0 0 var(--accent)}
+.pop .prow .meta{margin-left:auto;color:var(--dim);font-size:11px;font-family:var(--mono)}
+.pop .pmeta{padding:2px 8px 8px;color:var(--dim);font-size:11.5px;line-height:17px}
+.pop .pmeta code{font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.pop .pactions{display:flex;gap:6px;padding:4px 8px 2px}
 
 /* ── right panel: edge-anchored column, hidden until opened ─────────── */
 .overview{
@@ -995,8 +1021,8 @@ kbd{font-family:var(--kbd);font-size:10.5px;padding:1px 5px;border:.5px solid va
           <button class="send" id="send-btn" title="Send (Enter)">↑</button>
         </div>
         <div class="cmeta">
-          <span class="br">⌂ Local Checkout</span>
-          <span class="br">⑂ <b id="branch-label">—</b></span>
+          <button class="br" id="btn-checkout" title="Choose the local folder this session works in"><span class="ico">⌂</span> Local Checkout</button>
+          <button class="br" id="btn-branch" title="Switch branch, fetch origin, open on GitHub"><span class="ico">⑂</span> <b id="branch-label">—</b></button>
           <span class="grow"></span>
           <span id="foot-status"></span>
         </div>
@@ -1029,6 +1055,8 @@ kbd{font-family:var(--kbd);font-size:10.5px;padding:1px 5px;border:.5px solid va
 
 <!-- menus -->
 <div class="pop" id="pop-menu"></div>
+<div class="pop" id="pop-checkout" style="min-width:320px"></div>
+<div class="pop" id="pop-branch" style="min-width:320px"></div>
 <div class="pop" id="pop-model" style="min-width:300px"></div>
 <div class="pop" id="pop-perms" style="min-width:290px"></div>
 <div class="pop" id="pop-slash" style="min-width:340px"></div>
@@ -2035,7 +2063,190 @@ function openAtPop(anchor){
 /* ── overview rail ───────────────────────────── */
 function openOverview(key){
   document.querySelectorAll('.ovbody').forEach(b=>b.classList.remove('open'));
-  document.querySelectorAll('.ovrow').forEach(r=>r.classList.remove('active'));
+  /* ── footer pickers: local checkout folder and git branch ────────────── */
+
+/** Neutralino helpers, with a plain-browser fallback so the page stays honest
+ *  when it is opened outside the shell (no folder dialog available). */
+function nlReady(){ return typeof window.Neutralino !== 'undefined'; }
+async function openPathExternally(target){
+  try{
+    if(nlReady()){ await Neutralino.os.open(target); return true; }
+    return false;
+  }catch{ return false; }
+}
+async function pickFolder(){
+  try{
+    if(!nlReady()) return null;
+    const picked=await Neutralino.os.showFolderDialog('Choose the folder this session works in');
+    return picked?String(picked):null;
+  }catch{ return null; }
+}
+
+function rememberWorkspace(path){
+  try{
+    const list=JSON.parse(localStorage.getItem('liber-recent-workspaces')||'[]');
+    localStorage.setItem('liber-recent-workspaces',JSON.stringify([path,...list.filter(p=>p!==path)].slice(0,6)));
+  }catch{}
+}
+function recentWorkspaces(){
+  try{ return JSON.parse(localStorage.getItem('liber-recent-workspaces')||'[]'); }catch{ return []; }
+}
+
+/** Ask the daemon to root itself in another folder. It restarts there, so the
+ *  window has to re-read the token file the new instance writes. */
+async function switchWorkspace(target){
+  const pop=$('pop-checkout');
+  pop.innerHTML='<div class="ph">Switching workspace…</div><div class="pmeta">Restarting the daemon in <code>'+esc(target)+'</code></div>';
+  try{
+    const r=await api('/workspace/switch','POST',{path:target});
+    if(r.status>=400||!r.data?.success){ toast(r.data?.error||'switch refused'); closePops(); return; }
+    rememberWorkspace(r.data.cwd||target);
+    closePops();
+    toast('workspace → '+(r.data.cwd||target)+' · daemon restarting');
+    let up=false;
+    for(let i=0;i<40&&!up;i++){
+      await new Promise(res=>setTimeout(res,300));
+      try{ const h=await fetch(DAEMON+'/healthz',{cache:'no-store'}); up=h.ok; }catch{}
+    }
+    if(!up){ toast('daemon did not come back — reopen the window'); return; }
+    token='';
+    await loadToken();
+    if(!token){ toast('restarted, but the new token was not readable'); return; }
+    await loadConfig().catch(()=>{});
+    await loadWorkspace().catch(()=>{});
+    await loadProjects().catch(()=>{});
+    setState('online','IDLE');
+    toast(r.data.keys_copied?'workspace ready · provider keys copied here':'workspace ready');
+  }catch(err){ toast('switch failed: '+err.message); }
+}
+
+async function openCheckoutPop(anchor){
+  const pop=$('pop-checkout');
+  if(pop.classList.contains('open')&&pop.dataset.for==='checkout'){ closePops(); return; }
+  closePops();
+  pop.dataset.for='checkout';
+  pop.innerHTML='<div class="ph">Local checkout</div>';
+
+  const meta=add(pop,'div','pmeta');
+  meta.innerHTML='Working folder<br><code>'+esc(cwd||'(unknown)')+'</code>';
+
+  const actions=add(pop,'div','pactions');
+  const open=add(actions,'button','tinybtn','Open folder');
+  open.onclick=async e=>{ e.stopPropagation(); const ok=await openPathExternally(cwd); if(!ok) toast('cannot open the folder from here'); };
+  const copy=add(actions,'button','tinybtn','Copy path');
+  copy.onclick=async e=>{ e.stopPropagation(); try{ await navigator.clipboard.writeText(cwd); toast('path copied'); }catch{ toast('copy blocked'); } };
+
+  const recents=recentWorkspaces().filter(p=>p.toLowerCase()!==String(cwd||'').toLowerCase());
+  if(recents.length){
+    add(pop,'div','sep');
+    add(pop,'div','ph','Recent workspaces');
+    for(const path of recents){
+      const label=String(path).split(/[\\/]/).filter(Boolean).pop()||path;
+      const row=add(pop,'button','prow','<span>'+esc(label)+'</span><span class="meta">'+esc(path)+'</span>');
+      row.type='button';
+      row.onclick=()=>switchWorkspace(path);
+    }
+  }
+
+  add(pop,'div','sep');
+  const choose=add(pop,'button','prow','<span>Choose folder…</span><span class="meta">local drive</span>');
+  choose.type='button';
+  choose.onclick=async()=>{
+    const picked=await pickFolder();
+    if(!picked){ toast('no folder chosen'); return; }
+    if(String(picked).toLowerCase()===String(cwd||'').toLowerCase()){ toast('already working in that folder'); return; }
+    switchWorkspace(picked);
+  };
+
+  placePop(pop,anchor,'left');
+}
+
+async function openBranchPop(anchor){
+  const pop=$('pop-branch');
+  if(pop.classList.contains('open')&&pop.dataset.for==='branch'){ closePops(); return; }
+  closePops();
+  pop.dataset.for='branch';
+  pop.innerHTML='<div class="ph">Branch</div><div class="pmeta">reading git…</div>';
+
+  const r=await api('/git');
+  pop.innerHTML='';
+  add(pop,'div','ph','Branch');
+
+  if(r.status>=400||!r.data?.success){ add(pop,'div','pmeta','The daemon did not answer.'); placePop(pop,anchor,'left'); return; }
+  const d=r.data;
+  if(!d.is_git){
+    add(pop,'div','pmeta','This folder is not a git repository. Choose another folder in Local Checkout, or run <code>git init</code>.');
+    placePop(pop,anchor,'left');
+    return;
+  }
+
+  const head=add(pop,'div','pmeta');
+  head.innerHTML='On <b style="color:var(--text)">'+esc(d.branch||'detached')+'</b>'
+    +(d.dirty?' · uncommitted changes':' · clean')
+    +((d.ahead||d.behind)?' · ↑'+(d.ahead||0)+' ↓'+(d.behind||0):'');
+
+  const listWrap=add(pop,'div','');
+  listWrap.style.cssText='max-height:min(260px,40vh);overflow:auto';
+  for(const b of d.branches||[]){
+    const row=add(listWrap,'button','prow'+(b.current?' sel':''),
+      '<span>'+esc(b.name)+'</span>'+(b.current?'<span class="meta">current</span>':''));
+    row.type='button';
+    row.onclick=async()=>{
+      if(b.current){ closePops(); return; }
+      row.disabled=true;
+      const res=await api('/git/checkout','POST',{branch:b.name});
+      if(res.status<400&&res.data?.success){
+        toast('branch → '+(res.data.branch||b.name));
+        closePops();
+        await loadWorkspace();
+      }else{
+        row.disabled=false;
+        toast(res.data?.error||'checkout refused');
+      }
+    };
+  }
+
+  if(d.remote){
+    add(pop,'div','sep');
+    const remote=add(pop,'div','pmeta');
+    remote.innerHTML='Remote <b style="color:var(--text)">'+esc(d.remote.name)+'</b><br><code>'+esc(d.remote.url)+'</code>';
+    const actions=add(pop,'div','pactions');
+    const fetchBtn=add(actions,'button','tinybtn','Fetch origin');
+    fetchBtn.type='button';
+    fetchBtn.onclick=async e=>{
+      e.stopPropagation();
+      fetchBtn.textContent='fetching…'; fetchBtn.disabled=true;
+      const fres=await api('/git/fetch','POST');
+      if(fres.status<400&&fres.data?.success){
+        toast('fetched · ↑'+(fres.data.ahead||0)+' ↓'+(fres.data.behind||0));
+        closePops();
+        await loadWorkspace();
+      }else{
+        fetchBtn.disabled=false; fetchBtn.textContent='Fetch origin';
+        toast(fres.data?.error||'fetch failed');
+      }
+    };
+    if(d.github_url){
+      const gh=add(actions,'button','tinybtn','Open on GitHub');
+      gh.type='button';
+      gh.onclick=async e=>{
+        e.stopPropagation();
+        const opened=await openPathExternally(d.github_url);
+        if(!opened){ try{ window.open(d.github_url,'_blank'); }catch{ toast(d.github_url); } }
+      };
+    }
+  }else{
+    add(pop,'div','pmeta','No remote configured — nothing to fetch.');
+  }
+
+  placePop(pop,anchor,'left');
+}
+
+$('btn-checkout')?.addEventListener('click',e=>{ e.stopPropagation(); openCheckoutPop(document.querySelector('.cbox')||$('btn-checkout')); });
+$('btn-branch')?.addEventListener('click',e=>{ e.stopPropagation(); openBranchPop(document.querySelector('.cbox')||$('btn-branch')); });
+
+
+document.querySelectorAll('.ovrow').forEach(r=>r.classList.remove('active'));
   const body=$('ov-'+key);
   const row=document.querySelector('.ovrow[data-ov="'+key+'"]');
   if(body)body.classList.add('open');
@@ -2314,7 +2525,7 @@ $('btn-review').onclick=()=>openOverview('review');
 document.querySelectorAll('.ovrow').forEach(r=>r.onclick=()=>openOverview(r.dataset.ov));
 document.addEventListener('click',e=>{
   if(e.target.closest('.pop'))return;
-  if(e.target.closest('[data-menu],#btn-model,#btn-perms,#btn-context')||e.target.closest('#project-list .conv'))return;
+  if(e.target.closest('[data-menu],#btn-model,#btn-perms,#btn-context,#btn-checkout,#btn-branch')||e.target.closest('#project-list .conv'))return;
   closePops();
 });
 document.addEventListener('keydown',e=>{

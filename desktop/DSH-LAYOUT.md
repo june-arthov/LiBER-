@@ -40,3 +40,22 @@ fenced code with the language tag stripped.
 
 `MERLIN-PARITY.md` describes the previous Merlin-derived look; the layout numbers there are
 superseded for the desktop shell by this document.
+
+## Composer footer controls (added after the skin)
+
+Both footer chips are real buttons now, not labels:
+
+- **Local Checkout** — shows the working folder, opens it in Explorer, copies the path, lists
+  recent workspaces and offers *Choose folder…* (native folder dialog). Picking a folder calls
+  `POST /workspace/switch`: the daemon re-execs itself with the new cwd, keeping the same
+  `liber.yaml` (absolute path via `LIBER_CONFIG`) and copying `.liber/credentials.json` into the
+  new folder when it has none, so the providers keep working. The window then re-reads the token
+  file the new instance writes and reloads every panel. Workspace-local state (sessions, journal,
+  budget) starts fresh there by design.
+- **Branch** — `GET /git` returns the real branch, local branches, the origin URL and the
+  ahead/behind counts; clicking a branch calls `POST /git/checkout` (branch names are validated
+  against `--flags` and shell metacharacters), and *Fetch origin* calls `POST /git/fetch`.
+  *Open on GitHub* appears when origin points at github.com.
+
+`nativeAllowList` in `neutralino.config.json` had to gain `os.showFolderDialog` and `os.open`;
+without them Neutralino blocks both calls.

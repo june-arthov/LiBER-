@@ -15,7 +15,9 @@
     "app.*",
     "filesystem.readFile",
     "os.execCommand",
-    "os.getEnv"
+    "os.getEnv",
+    "os.showFolderDialog",
+    "os.open"
   ],
   "modes": {
     "window": {

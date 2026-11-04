@@ -112,4 +112,88 @@ function clear() {
   activity.length = 0;
 }
 
-module.exports = { summary, changedFiles, branch, isGitRepo, record, recent, clear };
+/**
+ * Run git and keep the failure text: a checkout that is refused must be able to
+ * say why ("local changes would be overwritten"), which `sh()` above swallows.
+ */
+function git(args, timeout = 8000) {
+  try {
+    const out = execFileSync('git', args, {
+      cwd: process.cwd(), encoding: 'utf8', timeout, windowsHide: true, maxBuffer: 4 * 1024 * 1024
+    });
+    return { ok: true, out: String(out || '').trim(), err: '' };
+  } catch (error) {
+    const out = String(error?.stdout || '').trim();
+    const err = String(error?.stderr || error?.message || '').trim();
+    return { ok: false, out, err };
+  }
+}
+
+/** Branch name that is safe to pass as a single argv entry: no flags, no shell syntax. */
+function validBranchName(name) {
+  const s = String(name || '').trim();
+  if (!s || s.length > 200) return false;
+  if (s.startsWith('-')) return false;
+  return /^[A-Za-z0-9._\/-]+$/.test(s) && !s.includes('..');
+}
+
+/** Local branches, the remote URL and how far the branch has drifted from upstream. */
+function gitState() {
+  if (!isGitRepo()) return { is_git: false, branch: null, branches: [], remote: null, ahead: null, behind: null, dirty: false };
+
+  const current = branch();
+  const list = git(['branch', '--format=%(refname:short)']).out.split('\n').map(s => s.trim()).filter(Boolean);
+  const remoteUrl = git(['remote', 'get-url', 'origin']).out || null;
+  const counts = git(['rev-list', '--left-right', '--count', 'HEAD...@{u}']);
+  let ahead = null;
+  let behind = null;
+  if (counts.ok) {
+    const [a, b] = counts.out.split(/\s+/);
+    ahead = Number(a);
+    behind = Number(b);
+  }
+  const dirty = (git(['status', '--porcelain']).out || '').trim().length > 0;
+
+  return {
+    is_git: true,
+    root: git(['rev-parse', '--show-toplevel']).out || process.cwd(),
+    branch: current,
+    branches: list.map(name => ({ name, current: name === current })),
+    remote: remoteUrl ? { name: 'origin', url: remoteUrl } : null,
+    ahead, behind, dirty
+  };
+}
+
+/** Checkout a local branch; refuses traversal, flags and unknown names. */
+function checkout(name) {
+  const target = String(name || '').trim();
+  if (!validBranchName(target)) return { ok: false, error: `Refusing '${target}': not a valid branch name.` };
+  const known = gitState().branches.map(b => b.name);
+  if (known.length && !known.includes(target)) return { ok: false, error: `No local branch named '${target}'.` };
+  const r = git(['checkout', target], 20000);
+  return r.ok
+    ? { ok: true, branch: branch(), message: r.out || `Switched to '${target}'.` }
+    : { ok: false, error: r.err || r.out || 'git checkout failed.' };
+}
+
+/** Fetch from origin so ahead/behind numbers are current. */
+function fetchRemote() {
+  const r = git(['fetch', '--prune', 'origin'], 30000);
+  const state = gitState();
+  return r.ok
+    ? { ok: true, ...state, message: r.out || 'Fetched origin.' }
+    : { ok: false, error: r.err || r.out || 'git fetch failed.', ...state };
+}
+
+/** GitHub web URL for the origin remote, when it points at github.com. */
+function githubUrl() {
+  const url = (gitState().remote || {}).url;
+  if (!url) return null;
+  let m = /^git@github\.com:(.+?)(?:\.git)?$/i.exec(url);
+  if (m) return `https://github.com/${m[1].replace(/\.git$/, '')}`;
+  m = /^https?:\/\/github\.com\/(.+?)(?:\.git)?$/i.exec(url);
+  if (m) return `https://github.com/${m[1].replace(/\.git$/, '')}`;
+  return null;
+}
+
+module.exports = { summary, changedFiles, branch, isGitRepo, record, recent, clear, gitState, checkout, fetchRemote, githubUrl, validBranchName };

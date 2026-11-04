@@ -126,9 +126,24 @@ class LiberDaemon {
       // would let any device spend the API key or call /shutdown. Override deliberately
       // with LIBER_HOST only behind a trusted proxy.
       const host = process.env.LIBER_HOST || '127.0.0.1';
-      this.server.listen(this.port, host, () => {
-        logger.info('SYSTEM', 'DAEMON_START', { port: this.port, host });
+      // A workspace switch respawns the daemon; the old socket can outlive the old
+      // process for a moment, so retry the bind instead of crashing on EADDRINUSE.
+      let bindAttempt = 0;
+      const bind = () => {
+        this.server.listen(this.port, host, () => {
+          logger.info('SYSTEM', 'DAEMON_START', { port: this.port, host, cwd: process.cwd() });
+        });
+      };
+      this.server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE' && bindAttempt < 20) {
+          bindAttempt++;
+          setTimeout(bind, 300);
+          return;
+        }
+        logger.error('SYSTEM', 'BIND_FAILED', { error: err.message });
+        process.exit(1);
       });
+      bind();
     } catch (err) {
       logger.error('SYSTEM', 'BOOT_FAILED', { error: err.message });
       process.exit(1);
@@ -414,6 +429,84 @@ class LiberDaemon {
       }
       else if (endpoint === '/workspace') {
         res.end(JSON.stringify({ success: true, workspace: workspace.summary(), activity: workspace.recent(20) }));
+      }
+      else if (endpoint === '/git') {
+        // Real repository state: local branches, the origin URL and how far the
+        // branch has drifted from its upstream. No cached guesses.
+        res.end(JSON.stringify({
+          success: true,
+          ...workspace.gitState(),
+          github_url: workspace.githubUrl()
+        }));
+      }
+      else if (endpoint === '/git/checkout') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { branch: target } = JSON.parse(body || '{}');
+        const r = workspace.checkout(target);
+        res.statusCode = r.ok ? 200 : 400;
+        res.end(JSON.stringify({ success: r.ok, ...r }));
+      }
+      else if (endpoint === '/git/fetch') {
+        const r = workspace.fetchRemote();
+        res.statusCode = r.ok ? 200 : 400;
+        res.end(JSON.stringify({ success: r.ok, ...r }));
+      }
+      else if (endpoint === '/workspace/switch') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const requested = String(JSON.parse(body || '{}').path || '').trim();
+        if (!requested) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: 'Missing path.' }));
+          return;
+        }
+        const target = path.resolve(requested);
+        let stat = null;
+        try { stat = fs.statSync(target); } catch { /* reported below */ }
+        if (!stat || !stat.isDirectory()) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: `Not a directory: ${target}` }));
+          return;
+        }
+
+        // The daemon is rooted at its own cwd, so switching workspaces means
+        // restarting it there. The config file stays the one this daemon booted
+        // with (absolute path via LIBER_CONFIG) so the model and policy survive.
+        const configPath = path.resolve(process.cwd(), process.env.LIBER_CONFIG || 'liber.yaml');
+        const stateDir = path.join(target, '.liber');
+        let copiedKeys = false;
+        try {
+          fs.mkdirSync(stateDir, { recursive: true });
+          const src = path.resolve(process.cwd(), '.liber', 'credentials.json');
+          const dst = path.join(stateDir, 'credentials.json');
+          // Keys follow the app, not the folder: a new workspace with no store of
+          // its own inherits the configured providers instead of silently losing them.
+          if (fs.existsSync(src) && !fs.existsSync(dst)) {
+            fs.copyFileSync(src, dst);
+            try { fs.chmodSync(dst, 0o600); } catch { /* best effort on Windows */ }
+            copiedKeys = true;
+          }
+        } catch (err) {
+          logger.warn('SYSTEM', 'WORKSPACE_STATE_PREP_FAILED', { error: err.message });
+        }
+
+        const entry = path.resolve(__dirname, '..', '..', 'bin', 'liberd-entry');
+        res.end(JSON.stringify({ success: true, switching: true, cwd: target, keys_copied: copiedKeys, config: configPath }));
+
+        // Give the response a moment to flush before the process goes away.
+        setTimeout(() => {
+          const { spawn } = require('child_process');
+          const child = spawn(process.execPath, [entry], {
+            cwd: target,
+            detached: true,
+            stdio: 'ignore',
+            env: { ...process.env, LIBER_CONFIG: configPath }
+          });
+          child.unref();
+          logger.info('SYSTEM', 'WORKSPACE_SWITCH', { from: process.cwd(), to: target });
+          setTimeout(() => process.exit(0), 250);
+        }, 120);
       }
       else if (endpoint === '/skills') {
         const scanned = skills.scan(true);
