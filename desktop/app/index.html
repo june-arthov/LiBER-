@@ -694,7 +694,6 @@ body.sidebar-collapsed #caption-new{display:inline-flex}
 .empty .hero-title{font-size:26px;font-weight:500;letter-spacing:-.01em;line-height:32px;color:var(--text);margin-bottom:8px}
 .empty .hero-sub{font-size:13px;line-height:20px;color:var(--dim)}
 .empty .hero-sub b{color:var(--muted);font-weight:500}
-.convwrap:has(#empty-state) #prompt{min-height:52px}
 
 /* ── composer: 28px panel, centered at chat width + 32px ────────────── */
 .composer{
@@ -748,14 +747,14 @@ body.sidebar-collapsed #caption-new{display:inline-flex}
   width:100%;max-width:calc(var(--dsh-chat-w) + 32px);margin:0 auto;
   border:0;border-radius:28px;background:var(--bubble);
   box-shadow:0 0 0 .5px rgba(255,255,255,.12),0 4px 16px rgba(0,0,0,.03),0 0 24px rgba(0,0,0,.03);
-  overflow:hidden;padding:8px 0 0;
+  overflow:hidden;padding:10px 0 0;
   transition:box-shadow var(--t-med) var(--ease);
 }
 /* the capsule's line brightens on focus — neutral, no accent colour */
 .cbox:focus-within{
   box-shadow:0 0 0 1px rgba(255,255,255,.22),0 4px 16px rgba(0,0,0,.03),0 0 24px rgba(0,0,0,.03);
 }
-.chips{display:flex;flex-wrap:wrap;padding:0 8px;gap:6px}
+.chips{display:flex;flex-wrap:wrap;padding:0 14px;gap:6px}
 .chips:empty{display:none}
 .chip{height:24px;padding:0 8px;border:.5px solid var(--border-strong);border-radius:999px;background:#ffffff0a;color:var(--muted);font-size:12px}
 .chip b{color:var(--muted)}
@@ -763,11 +762,14 @@ body.sidebar-collapsed #caption-new{display:inline-flex}
   width:100%;resize:none;background:none;border:0;outline:none;
   color:var(--text);font-family:var(--sans);font-size:14px;line-height:24px;
   caret-color:var(--text);
-  padding:4px 8px 0 14px;min-height:36px;max-height:336px;
+  /* one left edge for prompt, chips, control row and meta row: 14px */
+  padding:2px 14px 0;min-height:26px;max-height:336px;
 }
-#prompt::placeholder{color:var(--dim)}
+/* the placeholder is the same weight and colour everywhere, no browser default fade */
+#prompt::placeholder{color:var(--dim);opacity:1;font-family:var(--sans)}
 #prompt:focus-visible{box-shadow:none}
-.crow{display:flex;align-items:center;gap:8px;padding:12px 8px 6px;min-height:36px;flex-wrap:wrap;row-gap:8px}
+/* 6px row pad + 8px button pad = the same 14px left edge as the prompt */
+.crow{display:flex;align-items:center;gap:8px;padding:4px 6px 4px;min-height:34px;flex-wrap:wrap;row-gap:8px}
 .cbtn{
   display:inline-flex;align-items:center;gap:8px;height:28px;min-width:0;
   padding:0 8px;border:0;border-radius:8px;background:none;
@@ -787,14 +789,14 @@ body.sidebar-collapsed #caption-new{display:inline-flex}
   width:34px;height:34px;min-width:34px;border-radius:999px;border:0;
   background:var(--accent);color:#fff;font-size:15px;font-weight:600;
   display:flex;align-items:center;justify-content:center;
-  transform:translateY(-2px);box-shadow:none;transition:background-color .1s;
+  box-shadow:none;transition:background-color .1s;
 }
-.send:not(:disabled):hover{background:#8fb8ff;box-shadow:none;transform:translateY(-2px)}
-.send:not(:disabled):active{transform:translateY(-1px) scale(.96)}
+.send:not(:disabled):hover{background:#8fb8ff;box-shadow:none}
+.send:not(:disabled):active{transform:scale(.94)}
 .send:disabled{background:var(--accent);opacity:.4;color:#fff;cursor:default}
 body.busy .send{animation:sendPulse 1.6s var(--ease) infinite}
 .cmeta{
-  display:flex;align-items:center;gap:10px;padding:0 14px 10px;
+  display:flex;align-items:center;gap:10px;padding:0 14px 8px;
   font-family:var(--sans);font-size:12px;line-height:18px;color:var(--dim);
 }
 .cmeta .br{color:var(--dim);gap:4px}
@@ -976,7 +978,7 @@ kbd{font-family:var(--kbd);font-size:10.5px;padding:1px 5px;border:.5px solid va
       <div class="empty" id="empty-state">
         <div class="hero-mark">◢</div>
         <div class="hero-title">What should we build?</div>
-        <div class="hero-sub">Machine-enforced grounding · every claim lands on a tool receipt. Ask anything, <b>@</b> to mention, <b>/</b> for actions.</div>
+        <div class="hero-sub">Machine-enforced grounding · every claim lands on a tool receipt.</div>
       </div>
     </div>
 
@@ -984,7 +986,7 @@ kbd{font-family:var(--kbd);font-size:10.5px;padding:1px 5px;border:.5px solid va
       <div class="stopbar" id="interrupted-bar" hidden></div>
       <div class="cbox">
         <div class="chips" id="chips"></div>
-        <textarea id="prompt" rows="1" placeholder="Ask anything, @ to mention, / for actions"></textarea>
+        <textarea id="prompt" rows="1" placeholder="Ask anything — @ to mention, / for actions"></textarea>
         <div class="crow">
           <button class="cbtn" id="btn-context" title="Add context (@)">＋</button>
           <button class="cbtn" id="btn-model" title="Select model (Ctrl+/)"><span class="cv" id="model-label">—</span><span class="chev"></span></button>
@@ -2082,7 +2084,7 @@ function saveSessionState(){
 }
 function newSessionId(){return 's'+Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4);}
 function activeSessionObj(){return sessionList.find(s=>s.id===activeSession)||null;}
-function emptyMarkup(){return '<div class="empty" id="empty-state"><div class="hero-mark">◢</div><div class="hero-title">What should we build?</div><div class="hero-sub">Machine-enforced grounding · every claim lands on a tool receipt. Ask anything, <b>@</b> to mention, <b>/</b> for actions.</div></div>';}
+function emptyMarkup(){return '<div class="empty" id="empty-state"><div class="hero-mark">◢</div><div class="hero-title">What should we build?</div><div class="hero-sub">Machine-enforced grounding · every claim lands on a tool receipt.</div></div>';}
 function sessionAge(at){return relTime(new Date(at||Date.now()).toISOString());}
 function cacheStream(){if($('stream'))streamCache.set(activeSession,$('stream').innerHTML);}
 
