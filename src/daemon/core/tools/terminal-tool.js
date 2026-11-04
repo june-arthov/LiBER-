@@ -268,10 +268,15 @@ function auditTerminal(entry) {
 function containerPolicy() {
   const term = policy.terminalConfig();
   const requested = term.backend === 'docker';
+  const image = term.image || 'alpine:latest';
+  const usable = requested ? containerUsable(false, image) : { ok: false, error: null };
   return {
-    on: requested && containerAvailable(),
+    // A daemon that answers but cannot start a container would make every
+    // command fail; treat "usable" as the condition, and say why otherwise.
+    on: requested && usable.ok,
     requested,
-    image: term.image || 'alpine:latest',
+    fallback_reason: requested && !usable.ok ? (usable.error || 'container runtime not usable') : null,
+    image,
     network: term.allow_network === true,
     memory: term.memory || '512m',
     pids: Number(term.pids) || 128
@@ -290,6 +295,32 @@ function containerAvailable(force = false) {
   } catch { ok = false; }
   _dockerCache = { ok, at: Date.now() };
   return ok;
+}
+
+let _runCache = null;
+/**
+ * Can this machine actually START a container with the configured image?
+ * A reachable daemon is not the same thing: a CI runner can have the CLI and a
+ * server version and still refuse to run (no image, no permissions). Checking by
+ * running is the only honest answer, and it is cached because it costs ~1s.
+ */
+function containerUsable(force = false, image = 'alpine:latest') {
+  if (!force && _runCache && _runCache.image === image && Date.now() - _runCache.at < 300_000) return _runCache;
+  if (!containerAvailable(force)) {
+    _runCache = { ok: false, image, at: Date.now(), error: 'docker daemon not reachable' };
+    return _runCache;
+  }
+  let ok = false;
+  let error = null;
+  try {
+    require('child_process').execFileSync('docker', ['run', '--rm', '--network', 'none', image, 'true'],
+      { timeout: 60000, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    ok = true;
+  } catch (e) {
+    error = String(e.stderr || e.message || 'container run failed').slice(0, 200);
+  }
+  _runCache = { ok, image, at: Date.now(), error };
+  return _runCache;
 }
 
 function runContainer(command, { cwd, timeout, profile }) {
@@ -445,5 +476,6 @@ module.exports = {
   sandboxPolicy,
   sandboxEnv,
   containerPolicy,
-  containerAvailable
+  containerAvailable,
+  containerUsable
 };

@@ -158,6 +158,9 @@ function gitState() {
     is_git: true,
     root: git(['rev-parse', '--show-toplevel']).out || process.cwd(),
     branch: current,
+    // CI checks out a commit, not a branch: say so instead of pretending a
+    // branch is current and letting the UI mark nothing.
+    detached: String(current || '').startsWith('detached@'),
     branches: list.map(name => ({ name, current: name === current })),
     remote: remoteUrl ? { name: 'origin', url: remoteUrl } : null,
     ahead, behind, dirty

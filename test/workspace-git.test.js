@@ -33,9 +33,15 @@ test('gitState reports the real branch and remote of this repo', () => {
   const state = workspace.gitState();
   if (!state.is_git) return;
   assert.equal(state.branch, workspace.branch());
-  assert.ok(Array.isArray(state.branches) && state.branches.some(b => b.current), 'the current branch is marked');
   assert.ok(state.remote === null || typeof state.remote.url === 'string');
   assert.ok(typeof state.dirty === 'boolean');
+  // CI checks out a commit, so a detached HEAD is a legitimate state: there is
+  // no current branch to mark, and pretending otherwise is what failed CI.
+  if (state.detached) {
+    assert.equal(state.branches.some(b => b.current), false, 'no branch is current while HEAD is detached');
+  } else {
+    assert.ok(state.branches.some(b => b.current), 'the current branch is marked');
+  }
 });
 
 test('githubUrl normalises ssh and https remotes, and ignores anything else', () => {
