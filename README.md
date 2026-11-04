@@ -44,7 +44,16 @@ LiBER agents are equipped with a first-class toolset:
 
 ## 🚀 Quick Start
 
-### 1. Installation
+### Install from npm
+
+```bash
+npm i -g @arthovlabs/liber
+liber --version
+```
+
+Both commands are installed: `liber` (CLI / TUI) and `liberd` (daemon).
+
+### Or from source
 
 ```bash
 git clone https://github.com/june-arthov/LiBER-.git

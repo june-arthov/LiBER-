@@ -1,5 +1,5 @@
 {
-  "name": "@june-arthov/liber",
+  "name": "@arthovlabs/liber",
   "version": "0.5.0",
   "description": "LiBER — autonomous agent orchestrator with a machine-enforced grounding gate and a skill library",
   "bin": {
