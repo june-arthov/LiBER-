@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
+const TRANSPARENT = process.argv.includes('--transparent');
 const SIZE = Number(process.argv[3]) || 256;
 const OUT = process.argv[2] || 'resources/icons/appIcon.png';
 
@@ -32,8 +33,8 @@ function render(W) {
   const R = 46 * s;
   const cx0 = W / 2, cy0 = W / 2;
 
-  // ── plate: dark rounded square with a warm vertical gradient
-  for (let y = 0; y < W; y++) {
+  // ── plate: dark rounded square with a warm vertical gradient (skipped with --transparent)
+  if (!TRANSPARENT) for (let y = 0; y < W; y++) {
     for (let x = 0; x < W; x++) {
       const cx = Math.min(x, W - 1 - x), cy = Math.min(y, W - 1 - y);
       let inside = true;
@@ -45,7 +46,7 @@ function render(W) {
   }
 
   // ── warm rim
-  for (let y = 0; y < W; y++) {
+  if (!TRANSPARENT) for (let y = 0; y < W; y++) {
     for (let x = 0; x < W; x++) {
       const cx = Math.min(x, W - 1 - x), cy = Math.min(y, W - 1 - y);
       const edge = (cx === 0 || cy === 0) || (cx < R && cy < R && Math.abs(Math.hypot(R - cx, R - cy) - R) < 1.3 * s);
@@ -148,9 +149,20 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width
 </svg>
 `;
 
+const atomTransparentSvg = svg
+  .split('\n')
+  .filter(line => !line.includes('<rect x="0" y="0"'))
+  .join('\n');
+
 const dir = path.dirname(OUT);
 fs.mkdirSync(dir, { recursive: true });
 fs.writeFileSync(OUT, encodePng(render(SIZE), SIZE));
-fs.writeFileSync(path.join(dir, 'appIcon.svg'), svg);
-fs.writeFileSync(path.join(dir, 'appIcon@512.png'), encodePng(render(512), 512));
-console.log(JSON.stringify({ png: path.resolve(OUT), size: SIZE, svg: path.resolve(path.join(dir, 'appIcon.svg')), bytes: fs.statSync(OUT).size }));
+// The plated app icon and the transparent mark are different assets: a
+// transparent run must never overwrite the icon the shell actually ships.
+if (TRANSPARENT) {
+  fs.writeFileSync(path.join(dir, 'atom-transparent.svg'), atomTransparentSvg);
+} else {
+  fs.writeFileSync(path.join(dir, 'appIcon.svg'), svg);
+  fs.writeFileSync(path.join(dir, 'appIcon@512.png'), encodePng(render(512), 512));
+}
+console.log(JSON.stringify({ png: path.resolve(OUT), size: SIZE, transparent: TRANSPARENT, bytes: fs.statSync(OUT).size }));

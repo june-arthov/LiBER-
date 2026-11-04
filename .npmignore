@@ -1,0 +1,12 @@
+# Python bytecode is a build artefact, not source
+__pycache__/
+*.pyc
+# Local runtime state and research material never ship
+.liber/
+.liber-test/
+.tmp-review/
+.dsh-research/
+.preview/
+desktop/dist/
+*.log
+*.tgz
