@@ -50,6 +50,55 @@ function isCommandSensitive(command) {
 // one of these is not a prefix match any more — it is a different command.
 const CHAIN = /[;&|`<>]|\$\(/;
 
+// Redirection and command substitution can write or execute whatever they
+// produce, so no prefix entry can cover them: they are refused outright.
+const REDIRECT_OR_SUBST = /(^|[^|])(>>?|<)|\$\(|`/;
+
+// Commands that only read. Listing a directory is not a privilege escalation,
+// and a model that cannot even look at the tree burns its whole loop budget on
+// denials (that is exactly what happened: three refused listings in one turn).
+const READ_ONLY_PREFIXES = [
+  'ls', 'dir', 'pwd', 'cd', 'cat', 'type', 'head', 'tail', 'wc', 'grep', 'rg',
+  'stat', 'file', 'du', 'df', 'date', 'whoami', 'hostname', 'uname', 'echo', 'printenv',
+  'git status', 'git log', 'git diff', 'git show', 'git rev-parse', 'git ls-files',
+  'git remote -v', 'git remote show', 'git blame',
+  'node --version', 'node -v', 'npm --version', 'npx --version', 'tsc --version',
+  'python --version', 'py --version',
+  'get-childitem', 'get-location', 'get-content', 'get-item', 'get-command',
+  'test-path', 'resolve-path', 'select-object', 'select-string', 'where-object',
+  'sort-object', 'measure-object', 'format-table', 'format-list', 'write-output',
+  'out-string', 'get-process', 'get-date', 'get-host'
+];
+
+/**
+ * Split a command into the stages a shell would actually run. Quotes are
+ * respected so `echo "a | b"` stays one stage.
+ */
+function splitSegments(command) {
+  const out = [];
+  let cur = '';
+  let quote = null;
+  const s = String(command || '');
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) {
+      cur += c;
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; cur += c; continue; }
+    if (c === ';' || c === '\n') { out.push(cur); cur = ''; continue; }
+    if (c === '&' && s[i + 1] === '&') { out.push(cur); cur = ''; i++; continue; }
+    if (c === '|' && s[i + 1] === '|') { out.push(cur); cur = ''; i++; continue; }
+    if (c === '|' || c === '&') { out.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out.map(x => x.trim()).filter(Boolean);
+}
+
+const isReadOnly = seg => matchesAllowEntry(READ_ONLY_PREFIXES, String(seg).trim().toLowerCase());
+
 /**
  * Does `command` start with an allowlist entry and stay *inside* that entry?
  * 'git status -s' matches 'git status'; 'git status; rm -rf /' does not.
@@ -72,16 +121,23 @@ function matchesAllowEntry(list, lower) {
  * read_only blocks state-changing commands; prompt fails closed and reports
  * that a human could approve (the engine escalates and re-dispatches).
  */
+/** What the caller may run instead of hunting for a permitted spelling. */
+function allowedHint(allowlist) {
+  const list = [...allowlist.map(String), ...READ_ONLY_PREFIXES.slice(0, 12)];
+  return list.filter(Boolean).slice(0, 24);
+}
+
 function evaluatePolicy(command, opts = {}) {
   const cmd = String(command || '').trim();
   const term = policy.terminalConfig();
   const lower = cmd.toLowerCase();
+  const segments = splitSegments(cmd);
 
   for (const pattern of term.denylist) {
     const p = String(pattern || '').trim().toLowerCase();
     if (!p) continue;
     const afterChain = CHAIN.test(cmd) && lower.includes(p);
-    if (lower.startsWith(p) || afterChain) {
+    if (lower.startsWith(p) || afterChain || segments.some(seg => seg.toLowerCase().startsWith(p))) {
       return {
         denied: true,
         reason: `Command blocked by policy.terminal.denylist ('${pattern}'). A denylist entry cannot be approved away.`
@@ -93,36 +149,55 @@ function evaluatePolicy(command, opts = {}) {
   // never the denylist above.
   if (opts.approved === true) return { denied: false, approved: true };
 
+  if (term.mode === 'open') return { denied: false };
+
+  const redirect = REDIRECT_OR_SUBST.test(cmd);
+  const hint = allowedHint(term.allowlist);
+
+  // A stage is covered if an allowlist entry covers it, or if it only reads.
+  const coveredSegments = redirect
+    ? [] // redirection invalidates every stage: it writes or substitutes
+    : segments.filter(seg => matchesAllowEntry(term.allowlist, seg.toLowerCase()) || isReadOnly(seg));
+  const uncovered = redirect ? [cmd] : segments.filter(seg => !matchesAllowEntry(term.allowlist, seg.toLowerCase()) && !isReadOnly(seg));
+
   if (term.mode === 'allowlist') {
-    if (!matchesAllowEntry(term.allowlist, lower)) {
+    if (redirect) {
       return {
         denied: true,
-        reason: `Command not in policy.terminal.allowlist (mode 'allowlist'). Chained operators are not covered by a prefix entry.`
+        reason: "Blocked: redirection (>, >>, <) and command substitution ($( ), backticks) are never covered by a prefix allowlist. Run the command without them, or ask the operator to widen policy.terminal.mode.",
+        allowed_prefixes: hint
       };
     }
-    return { denied: false };
-  }
-
-  if (term.mode === 'open') {
+    if (uncovered.length) {
+      return {
+        denied: true,
+        reason: `Command stage not allowed (mode 'allowlist'): '${uncovered[0].slice(0, 80)}'. Read-only inventory commands are always allowed (ls, dir, Get-ChildItem, cat, git log, …); pipelines are judged stage by stage. Allowed prefixes: ${hint.slice(0, 12).join(', ')}.`,
+        allowed_prefixes: hint
+      };
+    }
     return { denied: false };
   }
 
   if (term.mode === 'prompt') {
     // Fail closed, and say a human could approve: the engine escalates on
     // needs_approval and re-dispatches with meta.approved.
-    if (matchesAllowEntry(term.allowlist, lower)) return { denied: false };
+    if (!redirect && coveredSegments.length === segments.length) return { denied: false };
     return {
       denied: true,
       needs_approval: true,
-      reason: "Terminal mode 'prompt' needs human approval for unlisted commands. Allowlist the prefix for repeat use, or set policy.terminal.mode."
+      reason: "Terminal mode 'prompt' needs human approval for commands that change state or redirect output. Read-only listing/reading is allowed without asking.",
+      allowed_prefixes: hint
     };
   }
 
   if (term.mode === 'read_only' && MUTATION_PATTERNS.some(pattern => pattern.test(cmd))) {
-    if (!matchesAllowEntry(term.allowlist, lower)) {
+    const allowlisted = !redirect && segments.length > 0 &&
+      segments.every(seg => matchesAllowEntry(term.allowlist, seg.toLowerCase()));
+    if (!allowlisted) {
       return {
         denied: true,
-        reason: 'Command changes project/system state, blocked by read-only terminal policy. Allowlist it in liber.yaml or ask the operator to switch policy.terminal.mode.'
+        reason: 'Command changes project/system state, blocked by read-only terminal policy. Allowlist it in liber.yaml or ask the operator to switch policy.terminal.mode.',
+        allowed_prefixes: hint
       };
     }
   }
@@ -143,6 +218,7 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
       error: decision.reason,
       policy_denied: true,
       needs_approval: decision.needs_approval === true,
+      allowed_prefixes: decision.allowed_prefixes || null,
       command
     };
   }

@@ -80,7 +80,9 @@ test('allowlist terminal policy only runs listed prefixes', () => {
 
   assert.equal(evaluatePolicy('node -v').denied, false);
   assert.equal(evaluatePolicy('git status').denied, false);
-  assert.equal(evaluatePolicy('git log').denied, true);
+  assert.equal(evaluatePolicy('git log').denied, false, 'read-only git subcommands are allowed');
+  assert.equal(evaluatePolicy('npm install lodash').denied, true, 'an unlisted mutation is refused');
+  assert.equal(evaluatePolicy('git commit -m x').denied, true);
 });
 
 test('terminal denylist wins in every mode', () => {
@@ -94,8 +96,9 @@ test('prompt mode fails closed instead of running everything', () => {
   const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
   policy.configure({ terminal: { mode: 'prompt', allowlist: ['git status'], denylist: [] } });
 
-  const blocked = evaluatePolicy('dir');
-  assert.equal(blocked.denied, true, "'prompt' must not silently allow: there is no approval channel here");
+  assert.equal(evaluatePolicy('dir').denied, false, 'a read-only listing needs no approval');
+  const blocked = evaluatePolicy('npm install lodash');
+  assert.equal(blocked.denied, true, "'prompt' must not silently allow a mutation: there is no approval channel here");
   assert.equal(blocked.needs_approval, true);
   assert.match(blocked.reason, /prompt/);
 
@@ -122,8 +125,8 @@ test('human approval bypasses the mode gate but never the denylist', () => {
   const { evaluatePolicy } = require('../src/daemon/core/tools/terminal-tool');
   policy.configure({ terminal: { mode: 'prompt', allowlist: [], denylist: ['shutdown'] } });
 
-  assert.equal(evaluatePolicy('dir').denied, true);
-  assert.equal(evaluatePolicy('dir', { approved: true }).denied, false, 'an approved command runs');
+  assert.equal(evaluatePolicy('npm install lodash').denied, true);
+  assert.equal(evaluatePolicy('npm install lodash', { approved: true }).denied, false, 'an approved command runs');
   assert.equal(evaluatePolicy('shutdown /s', { approved: true }).denied, true, 'the denylist cannot be approved away');
 });
 
@@ -131,7 +134,7 @@ test('runTerminal keeps the approval signal instead of dropping it', async () =>
   const { runTerminal } = require('../src/daemon/core/tools/terminal-tool');
   policy.configure({ terminal: { mode: 'prompt', allowlist: [], denylist: [] } });
 
-  const res = await runTerminal({ command: 'dir' });
+  const res = await runTerminal({ command: 'npm install lodash' });
   assert.equal(res.policy_denied, true);
   assert.equal(res.needs_approval, true, 'the consumer must be able to see a human could approve');
   assert.ok(!('exit_code' in res), 'nothing was executed');

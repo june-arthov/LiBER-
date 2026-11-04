@@ -152,6 +152,24 @@ function pathMatchesEntry(entry, token) {
   return hay.includes(base) || hay.includes(needle);
 }
 
+/**
+ * Compare numbers the way a reader would: separators inside a number are
+ * formatting, not information. A receipt holding "(6, 182, 212)" must support a
+ * claim written "6,182,212" — a real turn was flagged for exactly that.
+ * Only separators *inside* a numeric token are removed, so "12 files, 34 dirs"
+ * does not become the number 1234.
+ */
+function normaliseNumbers(text) {
+  return String(text || '').replace(/\d[\d.,\s\u00a0]*\d|\d/g, m => m.replace(/[,\s\u00a0]/g, ''));
+}
+
+function numberSupported(needle, hay) {
+  if (String(hay).includes(String(needle))) return true;
+  const n = normaliseNumbers(needle);
+  if (n.length < 2) return false;
+  return normaliseNumbers(hay).includes(n);
+}
+
 function deterministicCheck(sentence, cites, ledger) {
   const violations = [];
   const stripped = String(sentence).replace(/\[E\d+\]/gi, ' ');
@@ -178,7 +196,7 @@ function deterministicCheck(sentence, cites, ledger) {
     const checkable = entries.filter(e => !['search', 'todo', 'task'].includes(e.kind));
     if (checkable.length) {
       const found = numbers.some(n =>
-        checkable.some(e => `${e.detail || ''} ${e.excerpt || ''} ${e.target || ''}`.includes(n))
+        checkable.some(e => numberSupported(n, `${e.detail || ''} ${e.excerpt || ''} ${e.target || ''}`))
       );
       if (!found) {
         violations.push({
