@@ -26,8 +26,11 @@ function isGitRepo() {
 }
 
 function branch() {
+  // `rev-parse --abbrev-ref HEAD` prints the literal string "HEAD" on a detached
+  // checkout (CI tag builds do this), which is not a branch name — reporting it
+  // as one made the UI show a branch called HEAD and marked nothing current.
   const b = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
-  if (b && b.trim()) return b.trim();
+  if (b && b.trim() && b.trim() !== 'HEAD') return b.trim();
   const detached = sh('git', ['rev-parse', '--short', 'HEAD']);
   return detached ? `detached@${detached.trim()}` : null;
 }
