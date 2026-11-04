@@ -980,6 +980,10 @@ kbd{font-family:var(--kbd);font-size:10.5px;padding:1px 5px;border:.5px solid va
     <button class="newchat" id="new-conv"><span class="plus">＋</span><span class="lbl">New session</span><span class="kbd">Ctrl N</span></button>
     <div class="sidebar-scroll">
       <div class="sect"><span>Workspace</span><span id="branch-mini"></span></div>
+      <div id="session-search-wrap" style="padding:2px 10px 6px">
+        <input id="session-search" type="search" placeholder="Search sessions" autocomplete="off"
+          style="width:100%;background:rgba(255,255,255,.04);border:.5px solid var(--border-strong);border-radius:8px;padding:5px 9px;color:var(--text);font-family:var(--sans);font-size:12px;outline:none">
+      </div>
       <div id="project-list"></div>
       <div class="sect" style="margin-top:16px"><span>Panels</span></div>
       <button class="sideitem" id="nav-skills"><span class="ico">◆</span><span class="lbl">Skills</span><span class="meta" id="skill-count"></span></button>
@@ -1509,6 +1513,13 @@ async function runTurn(message, opts = {}){
       closeThink();
       recordArtifacts(payload.grounding);
       refreshBudget().catch(()=>{});
+      {
+        const cur=activeSessionObj();
+        if(cur && (cur.title==='New session' || cur.title==='Current session') && lastUserText){
+          cur.title=String(lastUserText).replace(/\s+/g,' ').slice(0,48);
+          saveSessionState();renderSessions();
+        }
+      }
       if(answerEl&&answerEl.isConnected)answerEl.remove();
       if(payload.response) answerBlock(turn,payload.response);
       if(payload.grounding) audit(turn,payload.grounding);
@@ -2420,12 +2431,150 @@ function deleteSession(id){
   toast('deleted · '+removed.title);
 }
 
+/* ── session history: reopen a session from the daemon, not from RAM ───── */
+
+/** Messages worth showing: the harness stores observations and repair nudges in
+ *  the same list, and replaying those as chat would be gibberish. */
+const HISTORY_NOISE = /^(OBSERVATION \[E|STOP — you are out|You have at most \d|You returned an empty response|Your reply contained no \[FINAL|DENIED: approval|GROUNDING AUDIT|Your previous answer)/;
+
+function historyPairs(messages) {
+  const out = [];
+  let pendingUser = null;
+  for (const m of messages || []) {
+    const text = String(m.content || '').trim();
+    if (!text) continue;
+    if (m.role === 'user') {
+      if (HISTORY_NOISE.test(text)) continue;
+      pendingUser = text;
+      continue;
+    }
+    if (m.role === 'assistant') {
+      if (text === '[native tool calls]') continue;
+      // stored turns may still carry the raw protocol ([THOUGHT:], [FINAL:]);
+      // replay the answer the user actually saw, not the machinery.
+      const clean = stripInternal(text).trim();
+      if (!clean) continue;
+      out.push({ user: pendingUser, assistant: clean });
+      pendingUser = null;
+    }
+  }
+  if (pendingUser) out.push({ user: pendingUser, assistant: null });
+  return out;
+}
+
+/** Render stored history into the current view; returns how many turns landed. */
+function renderHistory(messages) {
+  const stream = $('stream');
+  if (!stream) return 0;
+  stream.innerHTML = '';
+  turns = [];
+  const pairs = historyPairs(messages);
+  for (const pair of pairs) {
+    const turn = newTurn();
+    if (pair.user) userMessage(turn, pair.user);
+    if (pair.assistant) answerBlock(turn, pair.assistant);
+  }
+  if (!pairs.length) stream.innerHTML = emptyMarkup();
+  stream.scrollTop = stream.scrollHeight;
+  return pairs.length;
+}
+
+/** Fetch and paint one session's messages from the daemon. */
+async function hydrateSession(id) {
+  const key = id && id !== 'default' ? 'dev-bot#' + id : 'dev-bot';
+  const { status, data } = await api('/sessions/history?key=' + encodeURIComponent(key)).catch(() => ({}));
+  if (status !== 200 || !data?.success) return 0;
+  const s = activeSessionObj();
+  if (s && data.title && (!s.title || s.title === 'New session' || s.title === 'Current session')) {
+    s.title = data.title;
+    saveSessionState();
+    renderSessions();
+  }
+  return renderHistory(data.messages || []);
+}
+
+/** Search every session's stored text; clicking a hit opens that session. */
+async function searchSessions(query) {
+  const host = $('project-list');
+  if (!host) return;
+  const q = String(query || '').trim();
+  if (q.length < 2) { renderSessions(); return; }
+
+  const local = sessionList.filter(s => String(s.title || '').toLowerCase().includes(q.toLowerCase()));
+  const { data } = await api('/sessions/search?q=' + encodeURIComponent(q)).catch(() => ({}));
+  const hits = (data?.hits || []).slice(0, 20);
+
+  host.innerHTML = '';
+  if (local.length) {
+    add(host, 'div', 'sect', '<span>Sessions</span>');
+    for (const s of local) {
+      const row = add(host, 'div', 'conv', `<span class="nm">${esc(s.title)}</span>`);
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
+      row.onclick = () => { $('session-search').value = ''; openSession(s.id); };
+    }
+  }
+  add(host, 'div', 'sect', `<span>In messages${hits.length ? ' · ' + hits.length : ''}</span>`);
+  if (!hits.length) {
+    add(host, 'div', 'skill', 'no match in stored history');
+    return;
+  }
+  for (const hit of hits) {
+    const id = String(hit.key || '').replace(/^dev-bot#/, '');
+    const row = add(host, 'div', 'conv', `<span class="nm">${esc(hit.snippet)}</span><span class="ago">${esc(hit.role)}</span>`);
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    row.onclick = () => { $('session-search').value = ''; if (id && id !== hit.key) openSession(id); };
+  }
+}
+
+/* typing filters locally and searches the stored history, debounced */
+(function () {
+  const input = $('session-search');
+  if (!input) return;
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => searchSessions(input.value), 180);
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { input.value = ''; renderSessions(); input.blur(); }
+    if (e.key === 'Enter') { e.preventDefault(); searchSessions(input.value); }
+  });
+})();
+
+/* ── merge daemon sessions into the sidebar list ─────────────────────── */
+/** The sidebar list is local, the messages are on disk. Without this, a fresh
+ *  window shows no history even though the daemon still has every session. */
+async function syncSessionsFromDaemon(){
+  const { status, data } = await api('/sessions').catch(() => ({}));
+  if (status !== 200 || !data?.success) return 0;
+  const keys = Object.keys(data.sessions || {});
+  let added = 0;
+  for (const key of keys) {
+    const id = key.startsWith('dev-bot#') ? key.slice('dev-bot#'.length) : (key === 'dev-bot' ? 'default' : key);
+    if (sessionList.some(s => s.id === id)) continue;
+    const row = data.sessions[key] || {};
+    const label = row.title || row.last || null;
+    sessionList.push({
+      id,
+      title: label ? String(label).replace(/\s+/g, ' ').slice(0, 48) : 'Session',
+      at: Date.now()
+    });
+    added++;
+  }
+  if (added) { saveSessionState(); renderSessions(); }
+  return added;
+}
+
 function paintSession(){
   const s=activeSessionObj();
-  $('stream').innerHTML=streamCache.get(activeSession)||emptyMarkup();
+  const cached=streamCache.get(activeSession);
+  $('stream').innerHTML=cached||emptyMarkup();
   $('crumb').innerHTML='<span>dev-bot</span><span class="sep">›</span><b>'+esc(s?s.title:'New session')+'</b>';
   turns=[];ctxChips=[];renderChips();
   renderSessions();
+  if(!cached) hydrateSession(activeSession).catch(()=>{});
 }
 
 function openSession(id){
@@ -2440,6 +2589,7 @@ function openSession(id){
 async function loadProjects(){
   if(!sessionList.length)loadSessionState();
   renderSessions();
+  syncSessionsFromDaemon().catch(()=>{});
   try{
     const {data}=await api('/ps');
     const agents=data?.data||[];

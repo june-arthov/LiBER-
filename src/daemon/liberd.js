@@ -314,13 +314,65 @@ class LiberDaemon {
         const handled = this.resolveHitl(verdict === 'approve' || verdict === true);
         res.end(JSON.stringify({ success: true, handled }));
       }
+      else if (endpoint === '/sessions/history') {
+        // The window keeps rendered HTML in memory only, so after a restart a
+        // session looked empty while its messages were still on disk. This
+        // endpoint is what makes a session reopenable.
+        const key = url.searchParams.get('key');
+        if (!key) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: 'Missing key.' }));
+          return;
+        }
+        const messages = (memory.get(key) || []).map(m => ({
+          role: m.role,
+          content: String(m.content || ''),
+          ts: m.ts || null
+        }));
+        const firstUser = messages.find(m => m.role === 'user' && !/^(OBSERVATION \[E|STOP —|You have at most|You returned an empty response|Your reply contained no \[FINAL|DENIED: approval|GROUNDING AUDIT|Your previous answer)/.test(m.content));
+        res.end(JSON.stringify({
+          success: true,
+          key,
+          title: firstUser ? firstUser.content.replace(/\s+/g, ' ').slice(0, 60) : null,
+          messages
+        }));
+        return;
+      }
+      else if (endpoint === '/sessions/search') {
+        const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
+        if (!q) {
+          res.end(JSON.stringify({ success: true, q, hits: [] }));
+          return;
+        }
+        const hits = [];
+        for (const [key, messages] of memory.history?.entries() || []) {
+          for (const m of messages) {
+            const text = String(m.content || '');
+            const at = text.toLowerCase().indexOf(q);
+            if (at < 0) continue;
+            hits.push({
+              key,
+              role: m.role,
+              snippet: text.slice(Math.max(0, at - 40), at + 90).replace(/\s+/g, ' ').trim(),
+              at
+            });
+            if (hits.length >= 60) break;
+          }
+          if (hits.length >= 60) break;
+        }
+        res.end(JSON.stringify({ success: true, q, hits }));
+        return;
+      }
       else if (endpoint === '/sessions') {
         if (req.method === 'GET') {
           const overview = {};
           for (const [agentId, messages] of memory.history?.entries() || []) {
             const assistant = messages.filter(m => m.role === 'assistant');
+            const noise = /^(OBSERVATION \[E|STOP —|You have at most|You returned an empty response|Your reply contained no \[FINAL|DENIED: approval|GROUNDING AUDIT|Your previous answer)/;
+            const firstUser = messages.find(m => m.role === 'user' && !noise.test(String(m.content || '')));
             overview[agentId] = {
               messages: messages.length,
+              title: firstUser ? String(firstUser.content).replace(/\s+/g, ' ').slice(0, 60) : null,
               last: assistant.length ? String(assistant[assistant.length - 1].content || '').slice(0, 80) : null
             };
           }
