@@ -21,6 +21,8 @@ const budget = require('./core/budget');
 const memoryBank = require('./core/tools/memory-tool');
 const automations = require('./core/automations');
 const vault = require('./core/vault');
+const voice = require('./core/voice');
+const connectors = require('./core/connectors');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -147,6 +149,23 @@ class LiberDaemon {
     }
   }
 
+  /**
+   * Turn every declared HTTP connector into a tool. Called at boot and on
+   * /connectors/reload, so editing connectors.json does not need a restart.
+   */
+  installConnectors() {
+    try {
+      const registry = require('./core/registry');
+      const out = connectors.install(registry);
+      this._connectors = out.installed;
+      logger.info('SYSTEM', 'CONNECTORS_INSTALLED', { tools: out.installed, problems: out.problems.length });
+      return out;
+    } catch (e) {
+      logger.warn('SYSTEM', 'CONNECTORS_FAILED', { error: e.message });
+      return { installed: [], problems: [e.message] };
+    }
+  }
+
   /** Facts a fresh session should not have to discover again. */
   seedStandingFacts(config) {
     try {
@@ -204,6 +223,7 @@ class LiberDaemon {
         if (mv.moved?.length) logger.info('SYSTEM', 'VAULT_MIGRATED_KEYS', { count: mv.moved.length });
       } catch (e) { logger.warn('SYSTEM', 'VAULT_MIGRATION_FAILED', { error: e.message }); }
       this.startAutomations();
+      this.installConnectors();
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
       // Bind to loopback by default: the daemon has no auth, so exposing it on the LAN
       // would let any device spend the API key or call /shutdown. Override deliberately
@@ -729,6 +749,40 @@ class LiberDaemon {
         memory.clear(id);
         for (const m of history) memory.add(id, m.role, m.content);
         res.end(JSON.stringify({ success: true, dropped, remaining: memory.get(id).length }));
+      }
+      else if (endpoint === '/connectors' || endpoint === '/connectors/reload') {
+        if (endpoint === '/connectors/reload') {
+          const out = this.installConnectors();
+          res.end(JSON.stringify({ success: true, ...out, connectors: connectors.load().connectors.map(c => ({ id: c.id, label: c.label, actions: c.actions.map(a => a.name) })) }));
+          return;
+        }
+        const parsed = connectors.load();
+        res.end(JSON.stringify({
+          success: true,
+          file: connectors.FILE(),
+          connectors: parsed.connectors.map(c => ({ id: c.id, label: c.label, baseUrl: c.baseUrl, actions: c.actions.map(a => ({ name: a.name, method: a.method, path: a.path, description: a.description })) })),
+          problems: parsed.problems
+        }));
+        return;
+      }
+      else if (endpoint === '/voice' || endpoint === '/voice/speak') {
+        if (endpoint === '/voice' && req.method === 'GET') {
+          const voices = await voice.voices();
+          res.end(JSON.stringify({ success: true, available: voice.available(), voices, audioDir: voice.AUDIO_DIR() }));
+          return;
+        }
+        if (endpoint === '/voice/speak' && req.method === 'POST') {
+          let b = ''; for await (const ch of req) b += ch;
+          const body = JSON.parse(b || '{}');
+          const out = await voice.speak(body.text, { voice: body.voice, rate: body.rate, play: body.play !== false });
+          logger.info('SYSTEM', 'VOICE_SPEAK', { ok: out.ok, bytes: out.bytes || 0 });
+          res.statusCode = out.ok ? 200 : 400;
+          res.end(JSON.stringify({ success: out.ok, ...out }));
+          return;
+        }
+        res.statusCode = 405;
+        res.end(JSON.stringify({ success: false, error: 'Method not allowed.' }));
+        return;
       }
       else if (endpoint === '/vault' || endpoint === '/vault/migrate') {
         const readBody = async () => { let b = ''; for await (const ch of req) b += ch; return JSON.parse(b || '{}'); };

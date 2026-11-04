@@ -126,6 +126,29 @@ class EvidenceLedger {
       if (s.length <= head + tail + 24) return s;
       return `${s.slice(0, head)}\n… [${s.length - head - tail} chars omitted] …\n${s.slice(-tail)}`;
     };
+    /**
+     * A JSON API answer has to keep the fields the model will cite, and a raw
+     * JSON.stringify puts them behind whatever the API ordered first. Flatten
+     * every scalar leaf to `path=value` so "default_branch=main" is present no
+     * matter where the object put it.
+     */
+    const flatten = (value, prefix = '', out = []) => {
+      if (out.length > 400) return out;
+      if (value === null || value === undefined) { out.push(`${prefix}=${value}`); return out; }
+      if (Array.isArray(value)) {
+        value.slice(0, 25).forEach((v, i) => flatten(v, `${prefix}[${i}]`, out));
+        return out;
+      }
+      if (typeof value === 'object') {
+        for (const [k, v] of Object.entries(value)) flatten(v, prefix ? `${prefix}.${k}` : k, out);
+        return out;
+      }
+      out.push(`${prefix}=${value}`);
+      return out;
+    };
+    const asJson = (text) => {
+      try { const parsed = JSON.parse(String(text)); return flatten(parsed).join('\n'); } catch { return null; }
+    };
     switch (kind) {
       case 'read':
         return headTail(result.content || '', 1400, 1000);
@@ -137,12 +160,18 @@ class EvidenceLedger {
         return headTail(result.diff_preview || result.message || '', 1000, 500);
       case 'search':
         return JSON.stringify((result.matches || result.results || []).slice(0, 5)).slice(0, 700);
-      case 'fetch':
+      case 'fetch': {
+        const flat = asJson(result.content);
+        if (flat) return headTail(flat, 3000, 1500);
         return headTail(result.content || '', 1000, 600);
+      }
       case 'memory':
         return JSON.stringify(result).slice(0, 400);
-      default:
-        return String(result.message || result.error || JSON.stringify(result)).slice(0, 400);
+      default: {
+        if (result.message || result.error) return headTail(result.message || result.error, 400, 200);
+        const flat = flatten(result).join('\n');
+        return headTail(flat, 3000, 1500);
+      }
     }
   }
 
