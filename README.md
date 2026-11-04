@@ -7,6 +7,11 @@
 [![Architecture](https://img.shields.io/badge/Architecture-Tier--3%20Cognitive-cyan.svg)](#architecture)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
+```bash
+npm i -g @arthovlabs/liber
+liber --version
+```
+
 ---
 
 ## ⚡ Overview
@@ -20,6 +25,11 @@ LiBER is an original codebase — not a fork of, and containing no code from, He
 - **Dual Surface:**
   - **LiBER Terminal:** Clean VT100/TrueColor streaming CLI interface.
   - **Tactical Cyber-Obsidian TUI:** Full Textual + Rich reactive telemetry dashboard with Human-In-The-Loop (HITL) safety breakpoints.
+- **Enforced Grounding, Not Requested:** A gate audits every auditable sentence against tool receipts and blocks, repairs, or labels what it cannot verify — the model cannot talk its way past it.
+- **Works While You Don't:** Scheduled automations run prompts through the same engine, gate and policy, each in its own session.
+- **Reach Beyond the Repo:** A headless Chromium the agent drives (open, click, type, screenshot) and HTTP connectors that turn any API into a tool — secrets resolved from the vault at call time, never in the prompt.
+- **Contained by Default:** Commands run in a container (no network, read-only root, workspace-only mount) or, where Docker is absent, PowerShell Constrained Language Mode — with the fallback stated instead of hidden.
+- **Multi-Client by Design:** One token per client with scopes, per-minute rate limits, rotation, and an audit line for every request.
 
 ---
 
@@ -33,9 +43,12 @@ LiBER agents are equipped with a first-class toolset:
 | `write_file` | Safe atomic file write with directory auto-creation |
 | `patch` | Surgical code replacement with whitespace-tolerant fuzzy matching & diff preview |
 | `search_files` | Recursive regex content search and file globbing |
-| `terminal` | PowerShell / Bash host shell execution with timeout and output capture |
+| `terminal` | Host shell execution with timeout and output capture — sandboxed: container by default (no network, read-only root, workspace-only mount), Constrained Language Mode as fallback |
+| `browser` | Real headless Chromium over CDP: `open`, `click` (selector or visible text), `type`, `press`, `extract`, `screenshot`, `eval` — for pages that need JavaScript, a login, or interaction |
 | `fetch_url` | HTTP(S) fetch with HTML→text extraction — ground external claims instead of guessing |
 | `web_search` | Keyless web search (DuckDuckGo → SearXNG fallback) returning titles/URLs/snippets |
+| `vault` | AES-256-GCM secret store: list (names + last-4 only), set, remove; reading a value back into a prompt is opt-in |
+| `conn_<id>` | One tool per declared HTTP connector, generated from `.liber/connectors.json`; `vault:name` headers resolve at call time |
 | `task` / `tasks` | Subagent orchestration: one isolated child turn, or up to 4 in parallel |
 | `todo_list` | Structured multi-step task planning and dependency tracking |
 | `memory` | Persistent cross-session knowledge bank (`.liber_memory.json`) |
@@ -236,7 +249,10 @@ Shipped skills: `iron-law` (always), `grounding-protocol` (always), `systematic-
 
 | Capability | Behaviour |
 |---|---|
-| Daemon auth | Every endpoint except `/healthz` requires `Authorization: Bearer <token>`; the token lives in `.liber/daemon.token` and is read by the CLI/TUI. |
+| Daemon auth | Every endpoint except `/healthz` needs a bearer token, resolved to a client with scopes (`read`, `chat`, `tools`, `admin`), a per-minute token bucket (429 + `Retry-After`) and one audit line per request in `.liber/auth-audit.log`. The desktop token in `.liber/daemon.token` is adopted as the `local` admin client; other clients get their own once-only token from `/clients`, and can be rotated or revoked without touching anyone else. |
+| Command sandbox | `policy.terminal.backend` selects the execution surface: `docker` runs in a container (no network, read-only root, `--cap-drop ALL`, `no-new-privileges`, memory/pids caps, only the workspace mounted) and `powershell` runs in Constrained Language Mode with a scrubbed environment. Docker unreachable means a stated fallback, never a silent one. Every decision and run is appended to `.liber/terminal-audit.log`. |
+| Secret vault | AES-256-GCM at rest (`.liber/vault.json`, key `0600`), listing exposes only the last four characters, tampered ciphertext fails closed, and connectors reference secrets as `vault:name` so they are resolved at call time. |
+| Automations | Interval or daily-at jobs stored in `.liber/automations.json`, run by one daemon timer through the same engine, gate and policy; `markRun()` makes a tick idempotent and a running job is never started twice. |
 | Turn serialization | One turn at a time per agent — simultaneous chats queue instead of interleaving observations into each other's context. |
 | Deterministic receipt checks | A cited receipt must actually mention the file and contain the numbers, quoted strings and line numbers claimed — enforced by code, no model involved. |
 | Secret redaction | Credential-shaped text (API keys, PATs, Bearer tokens, private keys) is redacted before session, journal and trace data reach disk. |
