@@ -294,6 +294,42 @@ function status() {
   return { providers: rows, custom: customs };
 }
 
+/**
+ * Fill provider/endpoint when liber.yaml leaves them null.
+ *
+ * A fresh install ships `provider: null` and `endpoint: null` on purpose: the
+ * only thing the user is expected to hand over is a key. Nothing used to turn
+ * that key back into a base URL, so the adapter built `null/chat/completions`
+ * and every turn died — either as a URL parse error or, when a placeholder key
+ * from .env.example was sent instead, as HTTP 401. The endpoint has to come from
+ * whichever provider is actually configured.
+ */
+function engineDefaults(engine = {}) {
+  const cfg = { ...engine };
+  const missingProvider = !cfg.provider || cfg.provider === 'null';
+  const missingEndpoint = !cfg.endpoint || cfg.endpoint === 'null';
+  if (!missingProvider && !missingEndpoint) return cfg;
+
+  const { providers, custom } = status();
+  // Rank what is configured: an explicit custom endpoint first, then real API
+  // keys, and only then a local server. A machine that happens to run Ollama
+  // exports OLLAMA_HOST, which would otherwise hijack the endpoint away from a
+  // perfectly good cloud key.
+  const rank = p => (p.kind === 'custom' ? 0 : p.kind === 'api' ? 1 : 2);
+  const pick = [...custom, ...providers]
+    .filter(p => p.configured && p.base && p.adapter)
+    .sort((a, b) => rank(a) - rank(b))[0];
+  if (!pick) return cfg;
+
+  if (missingProvider) cfg.provider = pick.adapter;
+  if (missingEndpoint) cfg.endpoint = String(pick.base).replace(/\/+$/, '');
+  if (!cfg.apiKey) {
+    const key = resolve(pick.id, pick.base);
+    if (key) cfg.apiKey = key;
+  }
+  return cfg;
+}
+
 function imports() {
   return IMPORTS.map(i => {
     let present = false, when = null;
@@ -499,5 +535,6 @@ module.exports = {
   status, imports, importFrom,
   setKey, setToken, clear, setCustom,
   resolve, resolveStored, test, deviceStart, devicePoll,
+  engineDefaults,
   storePath: () => STORE()
 };

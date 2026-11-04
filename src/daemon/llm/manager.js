@@ -22,6 +22,11 @@ class LLMManager {
    * @param {Object} config - Bagian 'engine' dari liber.yaml
    */
   initialize(config) {
+    // liber.yaml may leave provider/endpoint null and expect the installed key
+    // to supply them; resolve before anything reads config.endpoint, or the
+    // adapter ends up requesting null/chat/completions.
+    const { engineDefaults } = require('../core/providers');
+    config = engineDefaults(config);
     this.engineConfig = { ...config };
     const ProviderClass = this.adapters[config.provider];
     if (!ProviderClass) {
