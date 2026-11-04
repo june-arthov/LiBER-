@@ -3,10 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LiBER</title>
+<title>◢ L i B E R ◣</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 256 256%22><rect width=%22256%22 height=%22256%22 rx=%2246%22 fill=%22%230d0e10%22/><rect x=%2284%22 y=%2266%22 width=%2232%22 height=%22110%22 fill=%22%2339c5f0%22/><rect x=%2284%22 y=%22150%22 width=%2292%22 height=%2226%22 fill=%22%2339c5f0%22/><rect x=%22116%22 y=%2266%22 width=%2222%22 height=%2212%22 fill=%22%23ffffff%22 fill-opacity=%22.85%22/></svg>">
 <style>
   :root{
+  --gold:#E5B25C;
     --bg:#0d0e10; --panel:#141519; --panel2:#1a1c21; --panel3:#202329;
     --border:#232630; --border-strong:#30343f;
     --text:#dfe3ea; --muted:#8b93a3; --dim:#5a6172;
@@ -452,6 +453,10 @@ body.sidebar-collapsed #caption-new{display:inline-flex}
 /* brand row — DSH wordmark row, 44px under the 40px caption */
 .brand-row{height:44px;min-height:44px;display:flex;align-items:center;gap:8px;padding:0 4px;color:var(--text);overflow:hidden}
 .brand-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;color:var(--text);font-size:17px;line-height:1}
+.brand-logo{display:inline-flex;align-items:center;gap:7px;line-height:24px}
+.bl-mark{color:var(--gold);font-size:12px;opacity:.95}
+.bl-close{opacity:.62}
+.bl-word{font-size:15.5px;font-weight:600;letter-spacing:.2em}
 .brand-word{font-size:18px;font-weight:600;letter-spacing:.04em;line-height:24px}
 .brand-ver{font-family:var(--mono);font-size:10px;color:var(--dim);background:var(--panel2);border-radius:4px;padding:1px 5px;margin-left:2px}
 
@@ -973,8 +978,7 @@ kbd{font-family:var(--kbd);font-size:10.5px;padding:1px 5px;border:.5px solid va
   <!-- sidebar -->
   <aside class="sidebar" id="sidebar">
     <div class="brand-row">
-      <span class="brand-mark">◢</span>
-      <span class="brand-word">LiBER</span>
+      <span class="brand-logo"><span class="bl-mark">◢</span><span class="bl-word">L i B E R</span><span class="bl-mark bl-close">◣</span></span>
       <span class="brand-ver">v0.5</span>
     </div>
     <button class="newchat" id="new-conv"><span class="plus">＋</span><span class="lbl">New session</span><span class="kbd">Ctrl N</span></button>
@@ -3389,7 +3393,7 @@ async function renderPanel(){
   /* ── ABOUT ─────────────────────────────── */
   if(cat==='about'){
     const who=(await api('/whoami')).data||{};
-    p.innerHTML=`<h3>About LiBER</h3><div class="pd">Autonomous agent orchestrator with machine-enforced grounding.</div>
+    p.innerHTML=`<h3>◢ L i B E R ◣</h3><div class="pd">Autonomous agent orchestrator with machine-enforced grounding.</div>
       <table class="tbl"><tbody>
       <tr><td style="width:150px">App</td><td>0.5.0 · Neutralino / WebView2</td></tr>
       <tr><td>Daemon</td><td style="font-family:var(--mono)">${esc(who.cwd||'')}</td></tr>

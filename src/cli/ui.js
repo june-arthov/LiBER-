@@ -19,6 +19,7 @@ const C = {
   purple: (s) => (noColor ? s : `\x1b[38;2;168;85;247m${s}\x1b[0m`),
   green: (s) => (noColor ? s : `\x1b[38;2;16;185;129m${s}\x1b[0m`),
   amber: (s) => (noColor ? s : `\x1b[38;2;245;158;11m${s}\x1b[0m`),
+  gold: (s) => (noColor ? s : `\x1b[38;2;229;178;92m${s}\x1b[0m`),
   red: (s) => (noColor ? s : `\x1b[38;2;239;68;68m${s}\x1b[0m`),
   dim: (s) => (noColor ? s : `\x1b[38;2;148;163;184m${s}\x1b[0m`),
   darkDim: (s) => (noColor ? s : `\x1b[38;2;71;85;105m${s}\x1b[0m`),
@@ -69,7 +70,7 @@ function printAgyBanner(info = {}) {
   const topBar = C.darkDim('  ╭─') + titleBar + C.darkDim('─'.repeat(Math.max(0, innerWidth - titleLen)) + '─╮');
   const bottomBar = C.darkDim('  ╰─') + C.darkDim('─'.repeat(innerWidth) + '─╯');
 
-  const label = C.cyan(C.bold('▲ LIBER TERMINAL')) + C.dim('  Autonomous AI Agent Orchestrator');
+  const label = C.gold('◢') + C.bold(' L i B E R ') + C.gold('◣') + C.dim('  Autonomous AI Agent Orchestrator');
   const ver = C.purple(`v${VERSION}`);
   const padLen = Math.max(0, innerWidth - stripAnsi(label).length - stripAnsi(ver).length);
   const row1 = label + ' '.repeat(padLen) + ver;
