@@ -198,6 +198,157 @@
   ::-webkit-scrollbar{width:9px;height:9px}
   ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:5px;border:2px solid transparent;background-clip:content-box}
   ::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+
+  /* ══════════════════════════════════════════════════════════════════
+     DESIGN PASS v2 — typography, motion and polish
+     Font stacks and metrics are taken from the reference desktop shell
+     (design tokens --dt-font-sans / --dt-font-mono / --dt-line-height).
+     ══════════════════════════════════════════════════════════════════ */
+  :root{
+    /* exact type stacks from the reference tokens */
+    --sans:"Segoe WPC","Segoe UI",-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";
+    --mono:"JetBrains Mono","Cascadia Code","Cascadia Mono","DejaVu Sans Mono","Liberation Mono","Noto Sans Mono","Noto Mono","SF Mono",ui-monospace,monospace;
+    --kbd:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+    --lh:1.5;
+
+    /* motion scale */
+    --ease:cubic-bezier(.2,0,0,1);
+    --ease-out:cubic-bezier(.16,1,.3,1);
+    --spring:cubic-bezier(.34,1.56,.64,1);
+    --t-fast:120ms;
+    --t-med:180ms;
+    --t-slow:280ms;
+
+    /* elevation */
+    --sh-1:0 1px 2px rgba(0,0,0,.35);
+    --sh-2:0 6px 20px rgba(0,0,0,.45);
+    --sh-3:0 18px 50px rgba(0,0,0,.62);
+    --ring:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent);
+  }
+
+  body{font-family:var(--sans);line-height:var(--lh);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  #prompt,.f input,.f textarea,.f select,.dpanel input,.dpanel textarea{font-family:var(--sans)}
+  .brow,.dsec,.hint,.empty{line-height:var(--lh)}
+  code,pre,.mono,kbd,.f input[type=text],.f input[type=number],.pop .pi .tag,.ov-cwd{font-family:var(--mono)}
+  /* keycap */
+  kbd{font-family:var(--kbd);display:inline-block;font-size:10.5px;line-height:1.5;padding:1px 6px;border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:5px;background:var(--panel2);color:var(--text);box-shadow:0 1px 0 rgba(0,0,0,.35);white-space:nowrap}
+
+  /* ── universal smoothness ────────────────────────────────────────── */
+  button,.cbtn,.tinybtn,.menubtn,.iconbtn,.sideitem,.proj,.conv,.ovrow,.ditem,.tab,.btn,.chip .x,.sw,.newchat,
+  .pi,.brow,.act,details.step>summary{transition:background-color var(--t-fast) var(--ease),color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease),transform var(--t-fast) var(--ease),opacity var(--t-fast) var(--ease)}
+  button:active,.cbtn:active,.tinybtn:active,.btn:active,.sideitem:active,.ovrow:active,.newchat:active,.ditem:active{transform:translateY(.5px) scale(.984)}
+  button:focus-visible,.cbtn:focus-visible,.tinybtn:focus-visible,.btn:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,.ditem:focus-visible,[role=button]:focus-visible{outline:none;box-shadow:var(--ring)}
+
+  /* title bar */
+  .titlebar{backdrop-filter:saturate(1.4) blur(6px)}
+  .menubtn{transition:background-color var(--t-fast) var(--ease),color var(--t-fast) var(--ease),transform var(--t-fast) var(--ease)}
+  .pill{transition:border-color var(--t-med) var(--ease),color var(--t-med) var(--ease),box-shadow var(--t-med) var(--ease)}
+  .pill.online{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--green) 25%,transparent)}
+
+  /* sidebar: rows slide in on hover, active gets an accent spine */
+  .sideitem,.proj,.conv{position:relative;overflow:hidden}
+  .sideitem:hover,.proj:hover,.conv:hover{padding-left:calc(var(--pad-l,8px) + 2px)}
+  .conv{--pad-l:30px}
+  .conv:hover{padding-left:calc(var(--pad-l) + 2px)}
+  .conv.active::before{content:"";position:absolute;left:0;top:4px;bottom:4px;width:2px;border-radius:2px;background:var(--accent);box-shadow:0 0 10px color-mix(in srgb,var(--accent) 60%,transparent);animation:spineIn var(--t-slow) var(--ease-out)}
+  @keyframes spineIn{from{transform:scaleY(.2);opacity:0}to{transform:none;opacity:1}}
+  .newchat{background-image:linear-gradient(180deg,color-mix(in srgb,var(--accent) 8%,transparent),transparent);transition:background-color var(--t-fast),border-color var(--t-fast),box-shadow var(--t-fast),transform var(--t-fast)}
+  .newchat:hover{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent),0 6px 18px rgba(0,0,0,.35)}
+
+  /* messages arrive, they do not pop */
+  .turn{animation:turnIn var(--t-slow) var(--ease-out) both}
+  @keyframes turnIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .userrow{animation:userIn var(--t-med) var(--ease-out) both}
+  @keyframes userIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .answer,.audit,.card,.step{animation:softIn var(--t-med) var(--ease-out) both}
+  @keyframes softIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+  .worked{transition:color var(--t-fast)}
+
+  /* step disclosure animates open instead of jumping */
+  details.step>pre{animation:reveal var(--t-med) var(--ease-out) both}
+  @keyframes reveal{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}
+  details.step>summary:hover{color:var(--text);background:color-mix(in srgb,var(--panel3) 40%,transparent)}
+
+  /* streaming caret while a draft is arriving */
+  .answer.streaming::after{content:"";display:inline-block;width:7px;height:1em;margin-left:2px;vertical-align:-2px;
+    background:var(--accent);border-radius:1px;animation:caret 1s steps(2,end) infinite}
+  @keyframes caret{50%{opacity:0}}
+
+  /* composer */
+  .cbox{transition:border-color var(--t-med) var(--ease),box-shadow var(--t-med) var(--ease),background-color var(--t-med) var(--ease)}
+  .cbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent),0 10px 30px rgba(0,0,0,.35)}
+  .send{transition:transform var(--t-fast) var(--ease),box-shadow var(--t-med) var(--ease),background-color var(--t-med),filter var(--t-fast)}
+  .send:not(:disabled):hover{transform:translateY(-1px);box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 35%,transparent)}
+  .send:not(:disabled):active{transform:translateY(0) scale(.94)}
+  .send:disabled{animation:none}
+  body.busy .send{animation:sendPulse 1.4s var(--ease) infinite}
+  @keyframes sendPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 40%,transparent)}50%{box-shadow:0 0 0 7px transparent}}
+  .cbtn:hover{background:color-mix(in srgb,var(--accent) 9%,var(--panel2))}
+
+  /* popovers: spring in */
+  .pop.open{animation:popSpring var(--t-med) var(--spring) both;transform-origin:var(--pop-origin,50% 100%)}
+  @keyframes popSpring{from{opacity:0;transform:translateY(6px) scale(.97)}to{opacity:1;transform:none}}
+  .pop .pi{transition:background-color var(--t-fast) var(--ease),transform var(--t-fast) var(--ease)}
+  .pop .pi:hover{transform:translateX(2px)}
+  .pop .pi.sel{box-shadow:inset 2px 0 0 var(--accent)}
+
+  /* overview rail */
+  .ovrow:hover{background:color-mix(in srgb,var(--panel3) 60%,transparent)}
+  .ovrow.active{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent)}
+  .ovbody{padding-top:0;animation:ovOpen var(--t-med) var(--ease-out) both}
+  @keyframes ovOpen{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+  .act{transition:border-color var(--t-fast),background-color var(--t-fast)}
+  .act:hover{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
+
+  /* settings drawer */
+  .drawer{transition:transform var(--t-slow) var(--ease-out)}
+  .drawer-overlay{animation:fadeIn var(--t-med) var(--ease)}
+  .ditem{position:relative;transition:background-color var(--t-fast) var(--ease),color var(--t-fast) var(--ease),padding-left var(--t-fast) var(--ease)}
+  .ditem:hover{padding-left:26px}
+  .ditem.active{background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 78%,#fff));color:#04222c}
+  .dpanel>h3,.dpanel .pd{animation:softIn var(--t-med) var(--ease-out) both}
+  .tabs .tab{position:relative}
+  .tabs .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--accent);animation:tabIn var(--t-med) var(--ease-out)}
+  @keyframes tabIn{from{transform:scaleX(.4);opacity:.4}to{transform:none;opacity:1}}
+
+  /* toasts */
+  #toast{transition:opacity var(--t-med) var(--ease),transform var(--t-med) var(--spring);animation:toastIn var(--t-med) var(--spring) both}
+  @keyframes toastIn{from{opacity:0;transform:translate(-50%,10px) scale(.97)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
+
+  /* skeletons while data loads */
+  .skeleton{position:relative;overflow:hidden;background:color-mix(in srgb,var(--panel2) 80%,transparent);border-radius:6px;color:transparent!important}
+  .skeleton::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:shimmer 1.2s var(--ease) infinite}
+  @keyframes shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+
+  /* scrollbars feel mechanical, not jumpy */
+  .stream{scroll-behavior:smooth}
+  ::-webkit-scrollbar-thumb{transition:background-color var(--t-fast)}
+  ::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--accent) 55%,var(--border-strong))}
+
+  /* cards/buttons get depth */
+  .card,.answer{border-radius:10px;box-shadow:var(--sh-1)}
+  .card:hover{box-shadow:var(--sh-2)}
+  .btn{box-shadow:var(--sh-1)}
+  .btn.primary{background-image:linear-gradient(180deg,color-mix(in srgb,var(--accent) 92%,#fff),var(--accent));box-shadow:0 2px 10px color-mix(in srgb,var(--accent) 26%,transparent)}
+  .btn.primary:hover{filter:brightness(1.06)}
+
+
+  /* message actions and code copy — appear on hover, never shift layout */
+  .answrap{position:relative}
+  .aactions{display:flex;gap:4px;margin-top:6px;opacity:0;transform:translateY(-2px);transition:opacity var(--t-fast) var(--ease),transform var(--t-fast) var(--ease)}
+  .answrap:hover .aactions,.answrap:focus-within .aactions{opacity:1;transform:none}
+  .aactions .tinybtn{padding:2px 7px;font-size:10.5px}
+  pre .codecopy{position:absolute;top:6px;right:6px;opacity:0;transition:opacity var(--t-fast) var(--ease)}
+  pre:hover .codecopy{opacity:1}
+  .ovempty{color:var(--dim);font-size:11.5px;padding:6px 10px 8px;line-height:1.45}
+  .act .ds.mono{font-family:var(--mono);font-size:10.5px;opacity:.75}
+
+  /* respect the OS setting */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+  }
+
 </style>
 </head>
 <body>
@@ -284,6 +435,8 @@
       <div class="ovbody" id="ov-files"></div>
       <button class="ovrow" data-ov="terminal">▮ Terminal <span class="badge" id="badge-terminal">0</span></button>
       <div class="ovbody" id="ov-terminal"></div>
+      <button class="ovrow" data-ov="artifacts">◈ Artifacts <span class="badge" id="badge-artifacts">0</span></button>
+      <div class="ovbody" id="ov-artifacts"></div>
       <button class="ovrow" data-ov="skills">◆ Skills <span class="badge" id="badge-skills">0</span></button>
       <div class="ovbody" id="ov-skills"></div>
     </div>
@@ -345,6 +498,7 @@ const ACCENTS=['#39c5f0','#2fd07a','#f2b544','#a78bfa','#f0616d'];
 
 let token='',busy=false,currentModel='',currentEndpoint='',reasoning='auto',permissions='default',cwd='',branch='';
 let ctxChips=[];
+let lastUserText='';
 let turnStart=0,stepCount=0;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -488,9 +642,43 @@ function step(parent,kind,label,body){
   return d;
 }
 function answerBlock(parent,text){
-  const a=add(parent,'div','answer','');
+  const wrap=add(parent,'div','answrap');
+  const a=add(wrap,'div','answer','');
   a.innerHTML=md(text);
-  return a;
+  decorateCode(wrap);
+  const acts=add(wrap,'div','aactions');
+  const cp=add(acts,'button','tinybtn','copy');
+  cp.onclick=()=>{navigator.clipboard.writeText(text).then(()=>toast('answer copied')).catch(()=>toast('copy blocked'));};
+  const rt=add(acts,'button','tinybtn','retry');
+  rt.onclick=()=>{ if(lastUserText){ toast('re-running the last request'); runTurn(lastUserText); } else toast('nothing to retry yet'); };
+  const up=add(acts,'button','tinybtn','👍'); up.title='good answer';
+  const dn=add(acts,'button','tinybtn','👎'); dn.title='bad answer';
+  for(const [btn,kind] of [[up,'up'],[dn,'down']]){
+    btn.onclick=()=>{
+      const fb=JSON.parse(localStorage.getItem('liber-feedback')||'[]');
+      fb.push({ts:new Date().toISOString(),kind,text:text.slice(0,200)});
+      try{localStorage.setItem('liber-feedback',JSON.stringify(fb.slice(-200)));}catch{}
+      btn.textContent=kind==='up'?'✓':'✓';
+      toast('feedback saved locally');
+    };
+  }
+  return wrap;
+}
+
+/** Give every fenced code block a copy button (smooth hover, no layout shift). */
+function decorateCode(scope){
+  scope.querySelectorAll('pre').forEach(pre=>{
+    if(pre.querySelector('.codecopy'))return;
+    pre.style.position='relative';
+    const b=document.createElement('button');
+    b.className='tinybtn codecopy';
+    b.textContent='copy';
+    b.onclick=()=>{
+      const code=pre.querySelector('code');
+      navigator.clipboard.writeText(code?code.textContent:pre.textContent).then(()=>{b.textContent='copied';setTimeout(()=>b.textContent='copy',1200);}).catch(()=>{b.textContent='blocked';});
+    };
+    pre.appendChild(b);
+  });
 }
 function audit(parent,g){
   const ok=g.status==='PASS';
@@ -501,6 +689,31 @@ function audit(parent,g){
       :`⚠ GROUNDING — ${v.length} unverified claim${v.length===1?'':'s'}\n`+v.slice(0,4).map(x=>`• [${x.code}] ${x.text}`).join('\n'));
   return el;
 }
+let turnArtifacts=[];
+function recordArtifacts(g){
+  const rec=(g&&g.ledger&&g.ledger.receipts)||[];
+  turnArtifacts=rec.slice(-40);
+  const badge=$('badge-artifacts');
+  if(badge)badge.textContent=String(turnArtifacts.length);
+  const box=$('ov-artifacts');
+  if(!box)return;
+  box.innerHTML='';
+  if(!turnArtifacts.length){
+    add(box,'div','ovempty','No receipts yet — the ledger fills as tools run.');
+    return;
+  }
+  for(const r of turnArtifacts.slice(-12).reverse()){
+    const row=add(box,'div','act');
+    const id=String(r.id||r.receipt||'E?');
+    const kind=String(r.tool||r.kind||'evidence');
+    const detail=String(r.path||r.detail||r.value||'').slice(0,120);
+    row.innerHTML='<div class="r"><span class="tag">'+esc(id)+'</span> <span class="nm">'+esc(kind)+'</span></div>'
+      +(detail?'<div class="ds mono">'+esc(detail)+'</div>':'');
+    row.setAttribute('role','button');
+    row.tabIndex=0;
+  }
+}
+
 function filesCard(parent,w){
   const f=(w.changed_files||[]);
   if(!f.length)return;
@@ -521,6 +734,7 @@ async function runTurn(message){
   const meta=add(turn,'div','worked','working…');
   const stepsWrap=add(turn,'div');
   setState('busy','EXECUTING');
+  document.body.classList.add('busy');
   $('send-btn').disabled=true;
 
   let answerEl=null,gotFinal=false;
@@ -539,11 +753,12 @@ async function runTurn(message){
     }else if(name==='grounding_audit'){
       step(stepsWrap,'obs',`🛠 GROUNDING REPAIR ${payload.attempt||1}/${payload.max_repairs||2}`,'Blocked unverified claims are being corrected.');
     }else if(name==='draft'){
-      if(!answerEl){answerEl=add(turn,'div','answer','');}
+      if(!answerEl){answerEl=add(turn,'div','answer','');answerEl.classList.add('streaming');}
       answerEl.textContent+=payload.delta||'';
       $('stream').scrollTop=$('stream').scrollHeight;
     }else if(name==='final'){
       gotFinal=true;
+      recordArtifacts(payload.grounding);
       if(answerEl&&answerEl.isConnected)answerEl.remove();
       if(payload.response) answerBlock(turn,payload.response);
       if(payload.grounding) audit(turn,payload.grounding);
@@ -585,6 +800,7 @@ async function runTurn(message){
   meta.onclick=()=>{stepsWrap.style.display=stepsWrap.style.display==='none'?'':'none';};
   stepsWrap.style.display='none';
   setState('online','IDLE');
+  document.body.classList.remove('busy');
   $('send-btn').disabled=false;
   loadWorkspace().catch(()=>{});
   $('stream').scrollTop=$('stream').scrollHeight;
@@ -655,6 +871,7 @@ async function send(){
     if(handled)return;
   }
 
+  lastUserText=text;
   userMessage(newTurn(),text);
   busy=true;
   await runTurn(text);
@@ -707,6 +924,7 @@ function placePop(pop,anchor,align='left'){
   else {top=Math.max(gutter,vh-h-gutter);}
 
   top=Math.max(gutter,Math.min(top,vh-h-gutter));
+  pop.style.setProperty('--pop-origin', (top<r.top?'50% 100%':'50% 0%'));
   pop.style.left=left+'px';
   pop.style.top=top+'px';
 }
@@ -718,6 +936,25 @@ window.addEventListener('resize',()=>{
   if(popEl&&popEl.classList.contains('open')&&popAnchor)placePop(popEl,popAnchor,'right');
 });
 
+
+/* ── keyboard shortcut sheet (View → Keyboard shortcuts, or Ctrl+?) ── */
+const SHORTCUTS = [
+  ['Ctrl + N', 'New conversation'],
+  ['Ctrl + K', 'Open settings (search)'],
+  ['Ctrl + ,', 'Open settings'],
+  ['Ctrl + B', 'Toggle sidebar'],
+  ['Ctrl + Alt + O', 'Toggle overview rail'],
+  ['Ctrl + /', 'Model · reasoning picker'],
+  ['Ctrl + ?', 'This sheet'],
+  ['Enter', 'Send'],
+  ['Shift + Enter', 'New line'],
+  ['Tab', 'Accept slash suggestion'],
+  ['@', 'Mention a file, skill or URL'],
+  ['/', 'Slash actions'],
+  ['Esc', 'Close popup / drawer'],
+  ['↑ / ↓', 'Navigate a popup list'],
+];
+/* shortcut sheet lives in Settings → Keyboard Shortcuts (openSettingsAt) */
 const MENUS={
   file:[
     {label:'New Conversation',act:()=>newConversation()},
@@ -727,11 +964,13 @@ const MENUS={
   ],
   workspace:[
     {label:'New Conversation  Ctrl+N',act:()=>newConversation()},
+    {label:'Keyboard shortcuts  Ctrl+?',act:()=>openSettingsAt('keybinds')},
     {label:'Refresh Workspace',act:()=>loadWorkspace()},
     {label:'Skills Panel',act:()=>openOverview('skills')}
   ],
   view:[
     {label:'Toggle Sidebar  Ctrl+B',act:()=>toggleSidebar()},
+    {label:'Keyboard shortcuts  Ctrl+?',act:()=>openSettingsAt('keybinds')},
     {label:'Toggle Overview  Ctrl+Alt+O',act:()=>toggleOverview()},
     {label:'Settings  Ctrl+,',act:()=>openDrawer()}
   ],
@@ -754,7 +993,9 @@ function bindMenus(){
       pop.innerHTML='';
       for(const item of MENUS[btn.dataset.menu]||[]){
         const d=add(pop,'div','pi',`<span class="nm">${esc(item.label)}</span>`);
+        d.setAttribute('role','button');d.tabIndex=0;
         d.onclick=()=>{closePops();item.act();};
+        d.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();closePops();item.act();}};
       }
       placePop(pop,btn);
     };
@@ -785,7 +1026,7 @@ async function loadLiveModels(force) {
 async function openModelPop(anchor) {
   const pop = $('pop-model');
   trackPop(pop, anchor);
-  pop.innerHTML = '<div class="ph">Model · asking the provider…</div>';
+  pop.innerHTML = '<div class="ph">Model · asking the provider…</div><div class="pi"><div class="ds skeleton" style="height:14px;width:70%">loading</div></div><div class="pi"><div class="ds skeleton" style="height:14px;width:55%">loading</div></div>';
   placePop(pop, anchor, 'right');
   const models = await loadLiveModels(false);
   renderModelPop(anchor, models, '');
@@ -1277,6 +1518,8 @@ function openDrawer(){
   setTimeout(()=>$('drawer-search').focus(),50);
 }
 function closeDrawer(){$('drawer-overlay').classList.remove('open');}
+/** Open the settings drawer on a specific category (skips the tree). */
+function openSettingsAt(cat){dstate.cat=cat;dstate.item=null;dstate.q='';openDrawer();}
 function applyAccent(col){
   document.documentElement.style.setProperty('--accent',col);
   try{localStorage.setItem('liber-accent',col);}catch{}
@@ -1340,6 +1583,7 @@ document.addEventListener('keydown',e=>{
   if(e.ctrlKey&&k==='k'){e.preventDefault();openDrawer();}
   if(e.ctrlKey&&k==='/'){e.preventDefault();openModelPop($('btn-model'));}
   if(e.ctrlKey&&k==='n'){e.preventDefault();newConversation();}
+  if(e.ctrlKey&&(e.key==='?'||(e.shiftKey&&k==='/'))){e.preventDefault();openSettingsAt('keybinds');}
   if(e.key==='Escape'){closePops();closeDrawer();}
 });
 
@@ -1666,13 +1910,33 @@ async function renderPanel(){
 
   /* ── KEYBINDS ──────────────────────────── */
   if(cat==='keybinds'){
-    const sc=[['Enter','Send message'],['Shift+Enter','New line'],['Ctrl+N','New conversation'],
-      ['Ctrl+/','Model selector'],['Ctrl+B','Toggle sidebar'],['Ctrl+Alt+O','Toggle overview rail'],
-      ['Ctrl+, / Ctrl+K','Open settings'],['Tab','Accept slash command'],['Esc','Close popover or drawer']];
-    p.innerHTML=`<h3>Keyboard Shortcuts</h3><div class="pd">Bound in this build. Rebinding needs a shortcut layer the shell does not have.</div>
-      <table class="tbl"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>
-      ${sc.map(([k,d])=>`<tr><td style="font-family:var(--mono);color:var(--accent)">${esc(k)}</td><td>${esc(d)}</td></tr>`).join('')}
-      </tbody></table>`;
+    const groups=[
+      ['Navigation', [
+        ['Ctrl + N','New conversation'],
+        ['Ctrl + K','Open settings (search focus)'],
+        ['Ctrl + ,','Open settings'],
+        ['Ctrl + B','Toggle sidebar'],
+        ['Ctrl + Alt + O','Toggle overview rail'],
+        ['Ctrl + ?','This page'],
+        ['Esc','Close popover or drawer'],
+      ]],
+      ['Composer', [
+        ['Enter','Send message'],
+        ['Shift + Enter','New line'],
+        ['Tab','Accept slash suggestion'],
+        ['Ctrl + /','Model and reasoning picker'],
+        ['@','Mention a file, skill or URL'],
+        ['/','Slash actions'],
+        ['↑ / ↓','Navigate a popup list'],
+      ]],
+    ];
+    p.innerHTML=`<h3>Keyboard Shortcuts</h3>
+      <div class="pd">Every binding below is live in this build. Rebinding needs a shortcut layer the shell does not have yet.</div>
+      ${groups.map(([title,rows])=>`
+        <div class="dsec">${esc(title)}</div>
+        <table class="tbl"><thead><tr><th style="width:38%">Key</th><th>Action</th></tr></thead><tbody>
+        ${rows.map(([k,d])=>`<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(d)}</td></tr>`).join('')}
+        </tbody></table>`).join('')}`;
     return;
   }
 
