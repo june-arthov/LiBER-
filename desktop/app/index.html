@@ -2872,6 +2872,7 @@ const NAV2=[
   {id:'billing',label:'Billing',icon:'▤'},
   {id:'providers',label:'Providers',icon:'⌁'},
   {id:'connectors',label:'Connectors',icon:'⇄'},
+  {id:'access',label:'Access & Tokens',icon:'⚿'},
   {id:'keybinds',label:'Keyboard Shortcuts',icon:'⌨'},
   {id:'apikeys',label:'Tools & Keys',icon:'⚿'},
   {id:'sessions',label:'Sessions',icon:'▦'},
@@ -3396,6 +3397,92 @@ async function renderPanel(){
         toast('test toast sent');
       }catch(err){ toast('toast failed: '+err.message); }
     };
+    return;
+  }
+
+  if(cat==='access'){
+    p.innerHTML=`<h3>Access &amp; Tokens</h3>
+      <div class="pd">Every client gets its own token, scopes and rate limit, so a phone can read while the desktop app still does everything — and revoking one does not break the others. Tokens are stored as SHA-256, never in the clear.</div>
+      <div class="dsec">Clients</div>
+      <div id="ac-list" class="pmeta" style="padding:0 0 10px">reading…</div>
+      <div class="dsec">New client</div>
+      <div class="f"><label>Label</label><div class="c"><input type="text" id="ac-label" placeholder="e.g. phone via tailscale"></div></div>
+      <div class="f"><label>Scopes</label><div class="c" style="display:flex;gap:12px;flex-wrap:wrap">
+        <label style="display:flex;gap:5px;align-items:center;font-size:12px"><input type="checkbox" class="ac-scope" value="read" checked>read</label>
+        <label style="display:flex;gap:5px;align-items:center;font-size:12px"><input type="checkbox" class="ac-scope" value="chat" checked>chat</label>
+        <label style="display:flex;gap:5px;align-items:center;font-size:12px"><input type="checkbox" class="ac-scope" value="tools">tools</label>
+        <label style="display:flex;gap:5px;align-items:center;font-size:12px"><input type="checkbox" class="ac-scope" value="admin">admin</label>
+      </div></div>
+      <div class="f"><label>Requests per minute</label><div class="c"><input type="number" id="ac-rate" value="240" min="1" max="10000"></div></div>
+      <div class="brow" style="gap:6px;flex-wrap:wrap"><button class="btn primary" id="ac-create">Create client</button><button class="tinybtn" id="ac-audit">Show audit log</button></div>
+      <div id="ac-token" style="display:none;margin-top:10px;padding:9px 10px;border:.5px solid var(--border-strong);border-radius:9px;background:rgba(255,255,255,.03)">
+        <div style="font-size:11px;color:var(--amber);margin-bottom:5px">This token is shown once. Copy it now.</div>
+        <div id="ac-token-val" style="font-family:ui-monospace,monospace;font-size:11px;word-break:break-all;user-select:all"></div>
+        <div class="brow" style="margin-top:6px"><button class="tinybtn" id="ac-copy">Copy</button></div>
+      </div>
+      <div id="ac-audit-box" class="hint" style="display:none;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10.5px;line-height:15px;margin-top:8px;color:var(--dim);max-height:260px;overflow:auto"></div>`;
+    const listEl=p.querySelector('#ac-list');
+    const paint=async()=>{
+      listEl.textContent='reading…';
+      const r=await api('/clients').catch(()=>null);
+      const rows=(r&&r.data&&r.data.clients)||[];
+      listEl.innerHTML='';
+      for(const c of rows){
+        const box=document.createElement('div');
+        box.style.cssText='border:.5px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:8px';
+        box.innerHTML='<div style="display:flex;gap:8px;align-items:baseline">'
+          +'<b style="font-size:12.5px">'+esc(c.label)+'</b>'
+          +'<span style="font-size:10.5px;color:var(--dim);font-family:ui-monospace,monospace">'+esc(c.id)+'</span>'
+          +'<span style="flex:1"></span>'
+          +'<span style="font-size:10.5px;color:var(--dim)">'+c.perMin+'/min</span></div>'
+          +'<div style="font-size:11px;color:var(--muted);margin:3px 0 2px">scopes: '+esc(c.scopes.join(', '))+'</div>'
+          +'<div style="font-size:10.5px;color:var(--dim)">calls: '+c.calls+' · last used: '+esc(c.lastUsedAt?c.lastUsedAt.slice(0,16).replace('T',' '):'never')+'</div>';
+        const acts=document.createElement('div');
+        acts.style.cssText='display:flex;gap:6px;margin-top:7px';
+        const rot=document.createElement('button');
+        rot.className='tinybtn'; rot.textContent='Rotate token';
+        rot.onclick=async()=>{
+          const rr=await api('/clients/rotate','POST',{id:c.id});
+          if(rr&&rr.data&&rr.data.success) showToken(rr.data.token);
+          else toast((rr&&rr.data&&rr.data.error)||'rotate failed');
+          await paint();
+        };
+        acts.appendChild(rot);
+        if(c.id!=='local'){
+          const rev=document.createElement('button');
+          rev.className='tinybtn'; rev.textContent='Revoke'; rev.style.color='var(--red)';
+          rev.onclick=async()=>{ await api('/clients?id='+encodeURIComponent(c.id),'DELETE'); toast('revoked '+c.label); await paint(); };
+          acts.appendChild(rev);
+        }
+        box.appendChild(acts);
+        listEl.appendChild(box);
+      }
+    };
+    const showToken=(token)=>{
+      p.querySelector('#ac-token').style.display='';
+      p.querySelector('#ac-token-val').textContent=token;
+    };
+    p.querySelector('#ac-copy').onclick=async()=>{
+      const t=p.querySelector('#ac-token-val').textContent;
+      try{ await navigator.clipboard.writeText(t); toast('token copied'); }catch{ toast('select the token and copy manually'); }
+    };
+    p.querySelector('#ac-create').onclick=async()=>{
+      const label=p.querySelector('#ac-label').value.trim()||'client';
+      const scopes=[...p.querySelectorAll('.ac-scope')].filter(x=>x.checked).map(x=>x.value);
+      if(!scopes.length){ toast('pick at least one scope'); return; }
+      const rr=await api('/clients','POST',{label,scopes,perMin:Number(p.querySelector('#ac-rate').value)||240});
+      if(rr&&rr.data&&rr.data.success){ showToken(rr.data.token); p.querySelector('#ac-label').value=''; await paint(); }
+      else toast((rr&&rr.data&&rr.data.error)||'could not create');
+    };
+    p.querySelector('#ac-audit').onclick=async()=>{
+      const box=p.querySelector('#ac-audit-box');
+      if(box.style.display!=='none'){ box.style.display='none'; return; }
+      const r=await api('/clients/audit?tail=25').catch(()=>null);
+      const rows=(r&&r.data&&r.data.entries)||[];
+      box.textContent=rows.map(e=>e.ts.slice(11,19)+'  '+(e.client||'unknown')+'  '+e.method+' '+e.endpoint+'  '+(e.status||e.decision)+'  '+(e.reason||e.scope||'')).join('\n')||'no entries yet';
+      box.style.display='';
+    };
+    await paint();
     return;
   }
 

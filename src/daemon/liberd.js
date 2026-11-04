@@ -224,6 +224,8 @@ class LiberDaemon {
       } catch (e) { logger.warn('SYSTEM', 'VAULT_MIGRATION_FAILED', { error: e.message }); }
       this.startAutomations();
       this.installConnectors();
+      // Adopt .liber/daemon.token as the local admin client on first boot.
+      try { auth.bootstrap(); } catch (e) { logger.warn('SYSTEM', 'AUTH_BOOTSTRAP_FAILED', { error: e.message }); }
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
       // Bind to loopback by default: the daemon has no auth, so exposing it on the LAN
       // would let any device spend the API key or call /shutdown. Override deliberately
@@ -354,17 +356,96 @@ class LiberDaemon {
       return;
     }
 
-    if (!auth.isAuthorized(req, this.token)) {
+    // Every request is resolved to a client, then checked for scope and rate.
+    const requestStart = Date.now();
+    const client = auth.verify(auth.extract(req));
+    if (!client) {
       res.statusCode = 401;
       res.end(JSON.stringify({
         success: false,
-        error: 'Unauthorized. Send Authorization: Bearer <token> (token: .liber/daemon.token).'
+        error: 'Unauthorized. Send Authorization: Bearer <token>. The desktop token lives in .liber/daemon.token; other clients get their own from /clients (scope admin).'
       }));
       logger.warn('SYSTEM', 'AUTH_FAILED', { endpoint, ip: req.socket.remoteAddress });
+      auth.audit({ client: null, ip: req.socket.remoteAddress, method: req.method, endpoint, decision: 'deny', reason: 'bad token' });
       return;
     }
+    const needed = auth.scopeFor(req.method, endpoint);
+    if (!auth.can(client, needed)) {
+      res.statusCode = 403;
+      res.end(JSON.stringify({
+        success: false,
+        error: `Client '${client.id}' lacks the '${needed}' scope for ${req.method} ${endpoint}.`,
+        scopes: client.scopes,
+        required: needed
+      }));
+      auth.audit({ client: client.id, method: req.method, endpoint, decision: 'deny', reason: 'scope ' + needed });
+      return;
+    }
+    const limited = auth.rateLimit(client);
+    if (!limited.allowed) {
+      res.statusCode = 429;
+      res.setHeader('retry-after', Math.ceil(limited.retryAfterMs / 1000));
+      res.end(JSON.stringify({
+        success: false,
+        error: `Rate limit reached for '${client.id}' (${limited.limit}/min). Retry in ${Math.ceil(limited.retryAfterMs / 1000)}s.`,
+        retry_after_ms: limited.retryAfterMs
+      }));
+      auth.audit({ client: client.id, method: req.method, endpoint, decision: 'deny', reason: 'rate limit' });
+      return;
+    }
+    auth.touch(client);
+    res.on('finish', () => auth.audit({
+      client: client.id,
+      method: req.method,
+      endpoint,
+      status: res.statusCode,
+      scope: needed,
+      ms: Date.now() - requestStart
+    }));
 
     try {
+      if (endpoint === '/clients' || endpoint === '/clients/rotate' || endpoint === '/clients/audit') {
+        if (endpoint === '/clients' && req.method === 'GET') {
+          res.end(JSON.stringify({ success: true, clients: auth.list(), scopes: auth.SCOPES }));
+          return;
+        }
+        if (endpoint === '/clients' && req.method === 'POST') {
+          let b = ''; for await (const ch of req) b += ch;
+          const body = JSON.parse(b || '{}');
+          const out = auth.create(body.label, { scopes: body.scopes, perMin: body.perMin });
+          // The token is in this response and nowhere else, ever.
+          res.statusCode = out.ok ? 200 : 400;
+          res.end(JSON.stringify({ success: out.ok, ...out, clients: auth.list() }));
+          return;
+        }
+        if (endpoint === '/clients' && req.method === 'DELETE') {
+          const out = auth.revoke(String(url.searchParams.get('id') || ''));
+          res.statusCode = out.ok ? 200 : 400;
+          res.end(JSON.stringify({ success: out.ok, ...out, clients: auth.list() }));
+          return;
+        }
+        if (endpoint === '/clients/rotate') {
+          let b = ''; for await (const ch of req) b += ch;
+          const body = JSON.parse(b || '{}');
+          const out = auth.rotate(String(body.id || ''));
+          res.statusCode = out.ok ? 200 : 400;
+          res.end(JSON.stringify({ success: out.ok, ...out, clients: auth.list() }));
+          return;
+        }
+        if (endpoint === '/clients/audit') {
+          let lines = [];
+          try {
+            lines = require('fs').readFileSync(path.join(process.cwd(), '.liber', 'auth-audit.log'), 'utf8')
+              .trim().split('\n').filter(Boolean).slice(-Number(url.searchParams.get('tail') || 40))
+              .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+          } catch { }
+          res.end(JSON.stringify({ success: true, entries: lines }));
+          return;
+        }
+        res.statusCode = 405;
+        res.end(JSON.stringify({ success: false, error: 'Method not allowed.' }));
+        return;
+      }
       if (endpoint === '/ps') {
         const status = Array.from(this.agents.entries()).map(([id, data]) => this.sanitizeAgent(id, data));
         res.end(JSON.stringify({ success: true, data: status }));
