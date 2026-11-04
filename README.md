@@ -151,9 +151,11 @@ the cited receipt actually entails it. It is still not a proof system: the seman
 subtle unsupported claims or flag supported ones, and a verifier outage fails open (recorded as
 `semantic: error`, never silently as `pass`).
 
-Run the enforcement suite with `npm test` (153 tests, including a scripted model that hallucinates,
-gets blocked, and is forced to read the file before answering, plus a 15-case grounding regression
-dataset). CI runs the suite on Linux and Windows via `.github/workflows/ci.yml`.
+Run the enforcement suite with `npm test` (242 tests: a scripted model that hallucinates, gets
+blocked, and is forced to read the file before answering; a 15-case grounding regression dataset;
+the terminal policy incl. per-stage pipeline evaluation; the approval-channel wiring; the budget
+guard; and the git/workspace surface). CI runs the suite on Linux and Windows via
+`.github/workflows/ci.yml`.
 
 ## 🔌 Providers
 

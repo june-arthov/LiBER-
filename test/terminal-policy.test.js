@@ -74,3 +74,19 @@ test('the denylist cannot be smuggled through a pipeline stage', () => {
   assert.equal(d.denied, true);
   assert.match(d.reason, /denylist/i);
 });
+
+test('piping a command into tail is allowed, and so is merging stderr into stdout', () => {
+  withTerminal({ mode: 'allowlist', allowlist: ['npm test'] });
+  for (const cmd of ['npm test 2>&1 | tail -20', 'npm test | tail -5', 'ls 2>/dev/null', 'git status 2>&1']) {
+    const d = terminal.evaluatePolicy(cmd);
+    assert.equal(d.denied, false, `'${cmd}' should run (got: ${d.reason})`);
+  }
+});
+
+test('a redirect that writes a real file is still refused', () => {
+  withTerminal({ mode: 'allowlist', allowlist: ['npm test'] });
+  for (const cmd of ['npm test > out.txt', 'npm test 2> errors.log', 'echo x >> log']) {
+    const d = terminal.evaluatePolicy(cmd);
+    assert.equal(d.denied, true, `'${cmd}' must be refused`);
+  }
+});

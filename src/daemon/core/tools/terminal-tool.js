@@ -54,6 +54,18 @@ const CHAIN = /[;&|`<>]|\$\(/;
 // produce, so no prefix entry can cover them: they are refused outright.
 const REDIRECT_OR_SUBST = /(^|[^|])(>>?|<)|\$\(|`/;
 
+/**
+ * Remove the redirects that write nothing: merging stderr into stdout (`2>&1`)
+ * and discarding to the null device. `npm test 2>&1 | tail -20` is a normal
+ * daily command; refusing it taught the model to avoid piping output, which is
+ * worse than the redirect itself. Real file redirects stay in and stay blocked.
+ */
+function stripBenignRedirects(command) {
+  return String(command || '')
+    .replace(/\d*>&\d+/g, ' ')
+    .replace(/\d*>>?\s*(\/dev\/null|nul)\b/gi, ' ');
+}
+
 // Commands that only read. Listing a directory is not a privilege escalation,
 // and a model that cannot even look at the tree burns its whole loop budget on
 // denials (that is exactly what happened: three refused listings in one turn).
@@ -128,9 +140,12 @@ function allowedHint(allowlist) {
 }
 
 function evaluatePolicy(command, opts = {}) {
-  const cmd = String(command || '').trim();
+  const raw = String(command || '').trim();
+  // Judge the command without the redirects that cannot write; splitting on the
+  // raw string would also cut `2>&1` at the ampersand and invent a bad stage.
+  const cmd = stripBenignRedirects(raw);
   const term = policy.terminalConfig();
-  const lower = cmd.toLowerCase();
+  const lower = raw.toLowerCase();
   const segments = splitSegments(cmd);
 
   for (const pattern of term.denylist) {
