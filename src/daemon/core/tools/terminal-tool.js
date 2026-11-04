@@ -326,9 +326,16 @@ function containerUsable(force = false, image = 'alpine:latest') {
 function runContainer(command, { cwd, timeout, profile }) {
   const { execFile } = require('child_process');
   const mount = `${path.resolve(process.cwd())}:/work:rw`;
+  // On POSIX hosts run as the invoking user: files the container writes land
+  // owned by them instead of root, which is both safer and the only way a write
+  // into the mount works under a rootless daemon.
+  const asUser = process.platform !== 'win32' && typeof process.getuid === 'function'
+    ? ['--user', `${process.getuid()}:${process.getgid()}`]
+    : [];
   const args = [
     'run', '--rm', '--interactive',
     ...(profile.network ? ['--network', 'bridge'] : ['--network', 'none']),
+    ...asUser,
     '--read-only',
     '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
     '--memory', profile.memory,
