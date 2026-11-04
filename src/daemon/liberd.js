@@ -17,6 +17,7 @@ const configApply = require('./core/config-apply');
 const workspace = require('./core/workspace');
 const skills = require('./core/skills');
 const providers = require('./core/providers');
+const budget = require('./core/budget');
 const { AgentQueue } = require('./core/lock');
 const logger = require('../utils/logger');
 
@@ -594,6 +595,51 @@ class LiberDaemon {
         memory.clear(id);
         for (const m of history) memory.add(id, m.role, m.content);
         res.end(JSON.stringify({ success: true, dropped, remaining: memory.get(id).length }));
+      }
+      else if (endpoint === '/budget') {
+        const first = Array.from(this.agents.values())[0];
+        const limits = first?.config?.limits || {};
+        const engine = first?.config?.engine || {};
+        if (req.method === 'POST') {
+          // Reset today's counter so a blocked day can be resumed without
+          // editing JSON on disk.
+          let body = '';
+          for await (const chunk of req) body += chunk;
+          const action = String(JSON.parse(body || '{}').action || 'reset');
+          if (action === 'reset') budget.reset();
+          res.end(JSON.stringify({ success: true, action, budget: budget.summary(limits, engine) }));
+          return;
+        }
+        res.end(JSON.stringify({ success: true, budget: budget.summary(limits, engine) }));
+        return;
+      }
+      else if (endpoint === '/budget/limit') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const parsed = JSON.parse(body || '{}');
+        const tokens = Number(parsed.tokens);
+        if (!Number.isFinite(tokens) || tokens < 0) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: 'tokens must be a number >= 0 (0 = no limit).' }));
+          return;
+        }
+        const { changes, error } = configApply.validateConfigUpdate({ 'limits.max_tokens_per_day': tokens });
+        if (error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error }));
+          return;
+        }
+        for (const [, agent] of this.agents.entries()) {
+          for (const [p, value] of Object.entries(changes)) this.applyConfigPath(agent, p, value);
+        }
+        this.persistConfigChanges(changes);
+        const first = Array.from(this.agents.values())[0];
+        res.end(JSON.stringify({
+          success: true,
+          limit_tokens: tokens,
+          budget: budget.summary(first?.config?.limits || {}, first?.config?.engine || {})
+        }));
+        return;
       }
       else if (endpoint === '/config/export') {
         try {

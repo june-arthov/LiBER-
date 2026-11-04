@@ -1198,6 +1198,29 @@ function renderPerms(){
 }
 
 /* ── workspace + config boot ─────────────────── */
+
+/* ── daily budget meter: visible before a turn is refused ────────────── */
+async function refreshBudget(){
+  const el=$('foot-status');
+  if(!el) return;
+  const r=await api('/budget').catch(()=>null);
+  const b=r?.data?.budget;
+  if(!b){ el.textContent=''; return; }
+  const pct=b.percent_used;
+  if(!b.allowed){
+    el.innerHTML='<span style="color:var(--red);cursor:pointer" title="Open Settings → Advanced to reset today or raise the limit">⚠ budget exhausted · fix</span>';
+    el.onclick=()=>openSettingsAt('advanced');
+    return;
+  }
+  if(pct!=null&&pct>=80){
+    el.innerHTML='<span style="color:#f2b544;cursor:pointer" title="'+Number(b.spent_tokens||0).toLocaleString('en-US')+' / '+Number(b.limit_tokens||0).toLocaleString('en-US')+' tokens today">⚠ '+pct+'% budget</span>';
+    el.onclick=()=>openSettingsAt('advanced');
+    return;
+  }
+  el.textContent='';
+  el.onclick=null;
+}
+
 async function loadConfig(){
   const {data}=await api('/config');
   const c=data?.config||{};
@@ -1483,6 +1506,7 @@ async function runTurn(message, opts = {}){
       gotFinal=true;
       closeThink();
       recordArtifacts(payload.grounding);
+      refreshBudget().catch(()=>{});
       if(answerEl&&answerEl.isConnected)answerEl.remove();
       if(payload.response) answerBlock(turn,payload.response);
       if(payload.grounding) audit(turn,payload.grounding);
@@ -2830,22 +2854,69 @@ async function renderPanel(){
     return;
   }
 
+
   /* ── ADVANCED ──────────────────────────── */
   if(cat==='advanced'){
     p.innerHTML=`<h3>Advanced</h3><div class="pd">Limits, tool access and the terminal backend.</div>
+      <div class="dsec">Today's usage</div>
+      <div id="av-budget" class="pmeta" style="padding:0 0 8px">reading…</div>
+      <div class="brow" id="av-budget-actions" style="gap:6px;flex-wrap:wrap">
+        <button class="tinybtn" id="av-reset-day">Reset today</button>
+        <button class="tinybtn" id="av-plus-1m">+1M tokens</button>
+        <button class="tinybtn" id="av-unlimited">No limit</button>
+      </div>
       <div class="dsec">Agent limits</div>
       <div class="f"><label>Max loops / turn</label><div class="c"><input type="number" id="av-loops" min="1" max="100" value="${l.circuit_breaker?.max_loops??12}"></div></div>
-      <div class="f"><label>Max tokens / day</label><div class="c"><input type="number" id="av-tok" min="0" value="${l.max_tokens_per_day??0}"><div class="hint">0 = unlimited.</div></div></div>
+      <div class="f"><label>Max tokens / day</label><div class="c"><input type="number" id="av-tok" min="0" value="${l.max_tokens_per_day??0}"><div class="hint">0 = unlimited. The guard blocks the turn before the next model call, so a spent day stops mid-task.</div></div></div>
       <div class="f"><label>Max cost / day ($)</label><div class="c"><input type="number" id="av-cost" min="0" step="0.1" value="${l.max_cost_per_day??0}"><div class="hint">Enforced only when price_per_1k is set.</div></div></div>
       <div class="dsec">Output limits</div>
       <div class="f"><label>Max output tokens</label><div class="c"><input type="number" id="av-out" min="0" step="256" value="${e.max_tokens??4096}"></div></div>
       <div class="dsec">Terminal backend</div>
       <div class="f"><label>Mode</label><div class="c">${sel('av-mode',[['read_only','read_only'],['allowlist','allowlist'],['prompt','prompt'],['open','open']],term.mode)}</div></div>
-      <div class="f"><label>Allowlist</label><div class="c"><textarea id="av-allow">${(term.allowlist||[]).join('\n')}</textarea><div class="hint">Prefixes that may run in allowlist mode.</div></div></div>
+      <div class="f"><label>Allowlist</label><div class="c"><textarea id="av-allow">${(term.allowlist||[]).join('\n')}</textarea><div class="hint">Prefixes that may run in allowlist mode. Read-only inventory commands are always allowed.</div></div></div>
       <div class="f"><label>Denylist</label><div class="c"><textarea id="av-deny">${(term.denylist||[]).join('\n')}</textarea><div class="hint">Always blocked, in every mode.</div></div></div>
       <div class="dsec">Subagents</div>
       <div class="f"><label>Parallel limit</label><div class="c"><input type="text" value="4 (fixed in code)" disabled style="opacity:.7"><div class="hint">task/tasks run read-only children with depth 1.</div></div></div>
       <div class="brow"><button class="btn primary" id="av-save">Save advanced</button></div>`;
+
+    const fmt = n => Number(n||0).toLocaleString('en-US');
+    const paintBudget = b => {
+      const box = p.querySelector('#av-budget');
+      if (!box) return;
+      if (!b) { box.innerHTML = 'unavailable'; return; }
+      const pct = b.percent_used == null ? 'no limit' : b.percent_used + '% of the day';
+      const state = b.allowed
+        ? '<span style="color:var(--green)">allowed</span>'
+        : '<span style="color:var(--red)">blocked — next turn will be refused</span>';
+      box.innerHTML = `<b style="color:var(--text)">${fmt(b.spent_tokens)}</b> tokens · ${b.calls} calls · $${Number(b.spent_usd||0).toFixed(4)}<br>`
+        + `Limit ${b.limit_tokens == null ? 'none' : fmt(b.limit_tokens)} (${pct}) · ${state}`
+        + (b.remaining_tokens == null ? '' : `<br>Remaining today: <b style="color:var(--text)">${fmt(b.remaining_tokens)}</b>`);
+    };
+    const loadBudget = async () => {
+      const r = await api('/budget').catch(() => null);
+      paintBudget(r?.data?.budget);
+      return r?.data?.budget;
+    };
+    loadBudget();
+
+    p.querySelector('#av-reset-day').onclick = async () => {
+      const r = await api('/budget', 'POST', { action: 'reset' });
+      if (r?.data?.budget) { paintBudget(r.data.budget); toast('budget counter reset for today'); }
+      else toast('reset failed');
+    };
+    p.querySelector('#av-plus-1m').onclick = async () => {
+      const cur = await loadBudget();
+      const next = Math.max(0, Number(cur?.limit_tokens || 0)) + 1_000_000;
+      const r = await api('/budget/limit', 'POST', { tokens: next });
+      if (r?.data?.budget) { paintBudget(r.data.budget); p.querySelector('#av-tok').value = next; toast('limit → ' + Number(next).toLocaleString('en-US')); }
+      else toast(r?.data?.error || 'could not raise the limit');
+    };
+    p.querySelector('#av-unlimited').onclick = async () => {
+      const r = await api('/budget/limit', 'POST', { tokens: 0 });
+      if (r?.data?.budget) { paintBudget(r.data.budget); p.querySelector('#av-tok').value = 0; toast('token limit removed (0 = no limit)'); }
+      else toast(r?.data?.error || 'could not clear the limit');
+    };
+
     p.querySelector('#av-save').onclick=()=>apply({
       'limits.circuit_breaker.max_loops':Number(p.querySelector('#av-loops').value),
       'limits.max_tokens_per_day':Number(p.querySelector('#av-tok').value),
@@ -2857,6 +2928,7 @@ async function renderPanel(){
     },'advanced');
     return;
   }
+
 
   /* ── PROVIDERS ─────────────────────────── */
   if(cat==='providers'){ await renderProviders(p); return; }
@@ -3253,6 +3325,7 @@ function importSourceHint(id){
   applyUiPrefs();
   openOverview('review');
   setInterval(()=>{loadWorkspace().catch(()=>{});},20000);
+  setInterval(()=>{refreshBudget().catch(()=>{});},60000);
   $('prompt').focus();
 })();
 </script>

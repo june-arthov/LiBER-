@@ -3,7 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const FILE = () => path.resolve(process.cwd(), '.liber', 'budget.json');
+// LIBER_BUDGET_FILE lets tests run against a scratch file instead of the live counter.
+const FILE = () => process.env.LIBER_BUDGET_FILE || path.resolve(process.cwd(), '.liber', 'budget.json');
 
 let state = null;
 
@@ -40,6 +41,19 @@ function reset() {
   save();
 }
 
+/** Drop the in-memory copy so the next read comes from disk. */
+function reload() {
+  state = null;
+  return load();
+}
+
+/** A limit of 0 means "no limit", which is what the settings panel promises. */
+function limitOf(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
 function priceOf(engineConfig = {}) {
   const inPrice = Number(engineConfig.price_in_per_1k);
   const outPrice = Number(engineConfig.price_out_per_1k);
@@ -62,8 +76,8 @@ function costOf(usage, engineConfig) {
  */
 function check(limits = {}, engineConfig = {}) {
   const s = load();
-  const limitUsd = Number.isFinite(Number(limits.max_cost_per_day)) ? Number(limits.max_cost_per_day) : null;
-  const limitTokens = Number.isFinite(Number(limits.max_tokens_per_day)) ? Number(limits.max_tokens_per_day) : null;
+  const limitUsd = limitOf(limits.max_cost_per_day);
+  const limitTokens = limitOf(limits.max_tokens_per_day);
   const priced = !!priceOf(engineConfig);
 
   let allowed = true;
@@ -71,11 +85,11 @@ function check(limits = {}, engineConfig = {}) {
 
   if (limitTokens !== null && s.total_tokens >= limitTokens) {
     allowed = false;
-    reason = `Daily token budget exhausted (${s.total_tokens}/${limitTokens} tokens).`;
+    reason = `Daily token budget exhausted (${s.total_tokens}/${limitTokens} tokens). Raise limits.max_tokens_per_day, set it to 0 for no limit, or reset today's counter in Settings → Advanced → Budget.`;
   }
   if (priced && limitUsd !== null && s.cost_usd >= limitUsd) {
     allowed = false;
-    reason = `Daily cost budget exhausted ($${s.cost_usd.toFixed(4)}/$${limitUsd.toFixed(2)}).`;
+    reason = `Daily cost budget exhausted ($${s.cost_usd.toFixed(4)}/$${limitUsd.toFixed(2)}). Raise limits.max_cost_per_day, set it to 0 for no limit, or reset today's counter.`;
   }
 
   return {
@@ -85,6 +99,28 @@ function check(limits = {}, engineConfig = {}) {
     spent_tokens: s.total_tokens,
     limit_usd: priced ? limitUsd : null,
     limit_tokens: limitTokens
+  };
+}
+
+/** Everything the UI needs to show headroom before a turn is refused. */
+function summary(limits = {}, engineConfig = {}) {
+  const s = load();
+  const r = check(limits, engineConfig);
+  const remaining = r.limit_tokens === null ? null : Math.max(0, r.limit_tokens - s.total_tokens);
+  const percent = r.limit_tokens === null || r.limit_tokens === 0
+    ? null
+    : Math.min(100, Math.round((s.total_tokens / r.limit_tokens) * 100));
+  return {
+    date: s.date,
+    calls: s.calls,
+    spent_tokens: s.total_tokens,
+    spent_usd: Number(s.cost_usd.toFixed(6)),
+    limit_tokens: r.limit_tokens,
+    limit_usd: r.limit_usd,
+    remaining_tokens: remaining,
+    percent_used: percent,
+    allowed: r.allowed,
+    reason: r.reason || null
   };
 }
 
@@ -106,4 +142,4 @@ function snapshot() {
   return { ...load() };
 }
 
-module.exports = { check, record, reset, snapshot, costOf, priceOf, today };
+module.exports = { check, summary, record, reset, reload, snapshot, costOf, priceOf, today };

@@ -22,14 +22,14 @@ agent:
     #   Google      provider: gemini     endpoint: https://generativelanguage.googleapis.com
     #               key: GEMINI_API_KEY · model: gemini-2.5-pro
     # Put the key in .env (or your environment) — never in this file.
-    provider: openai # LLMManager adapter id: openai | anthropic | gemini | ollama
-    model: "deepseek-v4.1-flash:1017" # Active cloud model
+    provider: "openai" # LLMManager adapter id: openai | anthropic | gemini | ollama
+    model: "deepseek-v4.1-flash" # Active cloud model
     endpoint: "https://ollama.com/v1" # Ollama Cloud, OpenAI-compatible
     apiKey: "${OLLAMA_CLOUD_API_KEY}" # Loaded automatically from .env or environment
     temperature: 0.2
     max_tokens: 4096
     top_p: 1
-    reasoning_effort: "high" # auto | low | medium | high — forwarded when the provider supports it
+    reasoning_effort: "auto" # auto | low | medium | high — forwarded when the provider supports it
     stream: true           # stream model output as DRAFT (unverified) while the audit runs
     native_tools: true     # use the provider's tool-calling API; falls back to the text protocol on error
     retry_attempts: 3      # transient provider errors (429/5xx/timeout) are retried with backoff
@@ -39,7 +39,7 @@ agent:
 
 limits:
   max_cost_per_day: 1
-  max_tokens_per_day: 2000000
+  max_tokens_per_day: 8000000
   circuit_breaker:
     max_loops: 12
     timeout: 30s
