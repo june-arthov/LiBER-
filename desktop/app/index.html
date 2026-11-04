@@ -84,8 +84,8 @@
   .answer table{border-collapse:collapse;margin:8px 0;font-size:12px}
   .answer th,.answer td{border:1px solid var(--border-strong);padding:4px 8px}
   .cite{color:var(--accent);font-family:var(--mono);font-size:11px;background:#0d2b33;border-radius:4px;padding:0 4px}
-  .audit{border:1px solid var(--green);border-left:3px solid var(--green);background:#0c1a12;color:var(--green);border-radius:6px;padding:7px 10px;font-size:12px;white-space:pre-wrap;margin-top:8px}
-  .audit.warn{border-color:var(--amber);border-left-color:var(--amber);background:#1a1409;color:var(--amber)}
+  .audit{border:0;background:none;color:var(--green);border-radius:6px;padding:6px 0;font-size:12px;white-space:pre-wrap;margin-top:8px}
+  .audit.warn{border:0;background:none;color:var(--amber)}
   .worked{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim);cursor:pointer;user-select:none;padding:2px 0}
   .worked:hover{color:var(--muted)}
   .card{border:1px solid var(--border-strong);border-radius:8px;background:var(--panel);margin:8px 0;overflow:hidden}
@@ -598,13 +598,15 @@ body.sidebar-collapsed #caption-new{display:inline-flex}
 .answer a{color:var(--accent)}
 .cite{color:var(--accent);font-family:var(--mono);font-size:11px;background:#7aaaff1a;border-radius:4px;padding:0 4px}
 .audit{
-  border:0;border-left:2px solid var(--green);border-radius:4px;
-  background:none;color:#9ee7b8;padding:2px 0 2px 10px;
+  /* no vertical rule: the colour and the label already carry the state, and the
+     left border read as a stray bracket in the transcript */
+  border:0;border-left:0;border-radius:4px;
+  background:none;color:#9ee7b8;padding:2px 0 2px 0;
   font-size:12.5px;line-height:20px;margin-top:10px;white-space:pre-wrap;
 }
-.audit.warn{border-left-color:var(--amber);background:none;color:#f3cf8a}
+.audit.warn{border-left-color:transparent;background:none;color:#f3cf8a}
 /* a pass with nothing checked is not a verification — keep it quiet */
-.audit.empty{border-left-color:#565b63;color:var(--dim)}
+.audit.quiet{border-left-color:transparent;color:var(--dim)}
 
 /* worked-for label + collapsed tool steps */
 .worked{
@@ -1351,7 +1353,7 @@ function audit(parent,g){
   }else if(!checked){
     // Nothing was asserted about the machine, so nothing was verified. A green
     // "PASS" here would be a false reassurance, not a result.
-    cls='audit empty';
+    cls='audit quiet';
     text=`GROUNDING · nothing to verify — no factual claims · ${rec} ${plural(rec,'receipt','receipts')}`;
   }else{
     text=`✔ GROUNDING PASS · ${rec} ${plural(rec,'receipt','receipts')} · ${checked} ${plural(checked,'claim','claims')} checked`;
