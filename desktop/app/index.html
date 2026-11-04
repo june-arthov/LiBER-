@@ -1796,12 +1796,20 @@ async function renderProviders(host){
     const result=row.querySelector('[data-f="result"]');
     row.querySelector('[data-a="use"]').onclick=()=>useProvider(p.adapter,p.base,p.id);
     row.querySelector('[data-a="test"]').onclick=async()=>{
-      result.textContent='testing…';
-      const r=await api('/providers/test','POST',{id:p.id});
+      const typed=keyInput.value.trim();
+      result.textContent=typed?'testing the pasted key…':'testing saved credential…';
+      const r=await api('/providers/test','POST',{id:p.id,key:typed||undefined});
       const t=r.data.result||{};
       result.innerHTML=t.ok
-        ? `<span style="color:var(--green)">✓ ${t.status} · ${t.model_count} models · ${t.latency_ms}ms</span>${t.sample&&t.sample.length?' · '+esc(t.sample.slice(0,3).join(', ')):''}`
+        ? `<span style="color:var(--green)">✓ ${t.status} · ${t.model_count} models · ${t.latency_ms}ms</span>${t.sample&&t.sample.length?' · '+esc(t.sample.slice(0,3).join(', ')):''}${t.auth_checked===false?' <span style="color:var(--amber)">· list is public — key not verified</span>':''}`
         : `<span style="color:var(--red)">✖ ${esc(t.error||'failed')}</span>`;
+      if(t.ok&&typed&&t.auth_checked!==false){
+        const saved=await api('/providers/key','POST',{id:p.id,key:typed});
+        if(saved.status===200&&saved.data.success){
+          toast(p.label+' verified and saved ('+saved.data.hint+')');
+          await renderProviders(host);
+        }
+      }
     };
     row.querySelector('[data-a="save"]').onclick=async()=>{
       const v=keyInput.value.trim();

@@ -373,8 +373,8 @@ class LiberDaemon {
       else if (endpoint === '/providers/test') {
         let body = '';
         for await (const chunk of req) body += chunk;
-        const { id } = JSON.parse(body || '{}');
-        res.end(JSON.stringify({ success: true, result: await providers.test(id) }));
+        const { id, key } = JSON.parse(body || '{}');
+        res.end(JSON.stringify({ success: true, result: await providers.test(id, { key }) }));
       }
       else if (endpoint === '/providers/import') {
         let body = '';

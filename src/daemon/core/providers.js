@@ -9,6 +9,43 @@ const { execFileSync } = require('child_process');
 
 const STORE = () => path.resolve(process.cwd(), '.liber', 'credentials.json');
 
+/**
+ * Environment values, including the project's .env file. The daemon resolves
+ * keys from .env at boot, so the Providers page must report the same truth.
+ */
+let dotenvCache = null;
+let dotenvMtime = 0;
+function dotenv() {
+  try {
+    const file = path.resolve(process.cwd(), '.env');
+    const st = fs.statSync(file);
+    if (dotenvCache && st.mtimeMs === dotenvMtime) return dotenvCache;
+    const map = {};
+    for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.startsWith('#') || !t.includes('=')) continue;
+      const i = t.indexOf('=');
+      const k = t.slice(0, i).trim();
+      let v = t.slice(i + 1).trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+      if (k) map[k] = v;
+    }
+    dotenvCache = map;
+    dotenvMtime = st.mtimeMs;
+    return map;
+  } catch {
+    dotenvCache = {};
+    return dotenvCache;
+  }
+}
+
+function envValue(name) {
+  if (!name) return null;
+  if (process.env[name]) return process.env[name];
+  const v = dotenv()[name];
+  return v || null;
+}
+
 /** adapter: how the daemon talks to it. kind: api | local | custom */
 const CATALOG = [
   // — OpenAI-compatible cloud APIs
@@ -224,11 +261,11 @@ function resolve(providerId, endpoint) {
     }
     // registry entry whose base matches the endpoint (Groq/DeepSeek/… env)
     const byBase = CATALOG.find(p => p.base && ep.startsWith(p.base.toLowerCase().replace(/\/$/, '')));
-    if (byBase?.env && process.env[byBase.env]) return process.env[byBase.env];
+    if (byBase?.env && envValue(byBase.env)) return envValue(byBase.env);
   }
 
   const meta = entryFor(providerId);
-  if (meta?.env && process.env[meta.env]) return process.env[meta.env];
+  if (meta?.env && envValue(meta.env)) return envValue(meta.env);
   return null;
 }
 
@@ -237,7 +274,7 @@ function status() {
   const store = readStore();
   const rows = CATALOG.map(p => {
     const rec = store.providers[p.id] || {};
-    const envVal = p.env && process.env[p.env] ? process.env[p.env] : null;
+    const envVal = p.env ? envValue(p.env) : null;
     const has = !!(rec.api_key || rec.access_token || envVal);
     return {
       id: p.id, label: p.label, adapter: p.adapter, base: rec.base || p.base,
@@ -305,8 +342,9 @@ function importFrom(id) {
   return { ...r, via: spec.id, expires_at: payload.expires_at || null };
 }
 
-/** Live probe: ask the provider for its model list with the resolved credential. */
-async function test(id) {
+/** Live probe: ask the provider for its model list with the resolved credential.
+ *  opts.key tests an ad-hoc key before it is saved. */
+async function test(id, opts = {}) {
   const store = readStore();
   const custom = id.startsWith('custom:') ? store.providers[id] : null;
   const meta = entryFor(id);
@@ -314,11 +352,17 @@ async function test(id) {
 
   const base = String(custom?.base || meta?.base || '').replace(/\/$/, '');
   const adapter = custom?.adapter || meta?.adapter || 'openai';
-  const key = resolve(id, base);
+  const typedKey = typeof opts.key === 'string' && opts.key.trim() ? opts.key.trim() : null;
+  const key = typedKey || resolve(id, base);
   const rec = store.providers[id];
-  const isOauth = !!(rec && rec.access_token && !rec.api_key);
+  const isOauth = !!(rec && rec.access_token && !rec.api_key) && !typedKey;
   if (!base) return { ok: false, error: 'This provider needs an explicit base URL (set it in Custom Endpoints).' };
-  if (!key && meta?.kind !== 'local') return { ok: false, error: 'No credential stored or in the environment.' };
+  if (!key && meta?.kind !== 'local') {
+    return {
+      ok: false,
+      error: 'No credential for ' + (meta?.label || id) + ': nothing saved, and ' + (meta?.env || 'its env var') + ' is not set in the environment or .env.'
+    };
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
@@ -350,12 +394,26 @@ async function test(id) {
       const json = JSON.parse(text);
       models = json.data || json.models || json.anchors || [];
     } catch { /* non-json */ }
+
+    // Some providers serve their model list publicly. If the same URL answers
+    // without credentials, a 200 says nothing about the key — say so instead of
+    // claiming the credential was verified.
+    let authChecked = true;
+    if (res.ok && key && adapter !== 'ollama') {
+      try {
+        const pub = await fetch(url, { signal: controller.signal });
+        if (pub.ok) authChecked = false;
+      } catch { /* ignore */ }
+    }
+
     return {
       ok: res.ok,
       status: res.status,
       latency_ms: Date.now() - started,
       model_count: Array.isArray(models) ? models.length : 0,
       sample: (models || []).slice(0, 5).map(m => m.id || m.name || m.model).filter(Boolean),
+      auth_checked: authChecked,
+      note: authChecked ? null : 'this provider lists models without credentials, so the key itself was not verified',
       error: res.ok ? null : String(text).slice(0, 200)
     };
   } catch (e) {

@@ -102,3 +102,37 @@ test('test() reports a clear error when no credential exists', async () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /No credential/);
 });
+
+test('.env values count as configured, exactly like the daemon sees them', () => {
+  fs.writeFileSync(path.join(process.cwd(), '.env'), 'CEREBRAS_API_KEY=cs-from-dotenv-123456\n', 'utf8');
+  const st = providers.status();
+  const c = st.providers.find(p => p.id === 'cerebras');
+  assert.equal(c.configured, true);
+  assert.equal(c.source, 'env');
+  assert.equal(providers.resolve('cerebras'), 'cs-from-dotenv-123456');
+  assert.equal(providers.resolveStored('cerebras'), null, 'stored-only never reads .env');
+});
+
+test('test() uses an ad-hoc key and reports whether the key was really checked', async () => {
+  const original = global.fetch;
+  const seen = [];
+  global.fetch = async (url, opts = {}) => {
+    seen.push({ url, auth: (opts.headers || {}).Authorization || null });
+    // first call (with our key) = 200 + models, second (public probe) = 401
+    if (seen.length === 1) {
+      return new Response(JSON.stringify({ data: [{ id: 'm-1' }, { id: 'm-2' }] }), { status: 200 });
+    }
+    return new Response('{}', { status: 401 });
+  };
+  let out;
+  try {
+    out = await providers.test('ollama-cloud', { key: 'sk-ad-hoc-000000000' });
+  } finally {
+    global.fetch = original;
+  }
+  assert.equal(out.ok, true);
+  assert.equal(out.model_count, 2);
+  assert.equal(seen[0].auth, 'Bearer sk-ad-hoc-000000000', 'the pasted key is what gets sent');
+  assert.equal(seen[1].auth, null, 'second probe is unauthenticated on purpose');
+  assert.equal(out.auth_checked, true);
+});
