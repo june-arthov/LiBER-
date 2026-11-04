@@ -342,7 +342,7 @@ const SLASH=[
 ];
 const ACCENTS=['#39c5f0','#2fd07a','#f2b544','#a78bfa','#f0616d'];
 
-let token='',busy=false,currentModel='',reasoning='auto',permissions='default',cwd='',branch='';
+let token='',busy=false,currentModel='',currentEndpoint='',reasoning='auto',permissions='default',cwd='',branch='';
 let ctxChips=[];
 let turnStart=0,stepCount=0;
 const $=id=>document.getElementById(id);
@@ -414,6 +414,7 @@ async function loadConfig(){
   const {data}=await api('/config');
   const c=data?.config||{};
   currentModel=c.engine?.model||'';
+  currentEndpoint=c.engine?.endpoint||'';
   reasoning=c.engine?.reasoning_effort||'auto';
   const mode=c.policy?.terminal?.mode||'allowlist';
   permissions=(PRESETS.find(p=>p.mode===mode)||{id:'default'}).id;
@@ -726,28 +727,121 @@ function bindMenus(){
     };
   });
 }
-function openModelPop(anchor){
-  const pop=$('pop-model');
-  pop.innerHTML='<div class="ph">Model</div>';
-  for(const m of CATALOG){
-    const d=add(pop,'div','pi'+(m.model===currentModel?' sel':''));
-    d.innerHTML=`<div class="r"><span class="nm">${esc(m.label)}</span><span class="tag">${m.provider}</span></div>`;
-    d.onclick=()=>{closePops();applyModel(m);};
+let LIVE_MODELS = [];
+let LIVE_KEY = '';
+let liveBusy = false;
+
+/** Ask the daemon which models the active endpoint really serves. */
+async function loadLiveModels(force) {
+  const key = currentModel + '|' + currentEndpoint;
+  if (!force && LIVE_KEY === key && LIVE_MODELS.length) return LIVE_MODELS;
+  if (liveBusy) return LIVE_MODELS;
+  liveBusy = true;
+  try {
+    const { data } = await api('/models');
+    LIVE_MODELS = Array.isArray(data?.models) ? data.models : [];
+    LIVE_KEY = key;
+  } catch {
+    LIVE_MODELS = [];
+  } finally {
+    liveBusy = false;
   }
-  add(pop,'div','sep');
-  add(pop,'div','ph','Reasoning effort');
-  for(const lvl of ['auto','low','medium','high']){
-    const d=add(pop,'div','pi'+(lvl===reasoning?' sel':''),`<span class="nm">${lvl[0].toUpperCase()+lvl.slice(1)}</span>`);
-    d.onclick=()=>{closePops();applyReasoning(lvl);};
-  }
-  placePop(pop,anchor,'right');
+  return LIVE_MODELS;
 }
+
+async function openModelPop(anchor) {
+  const pop = $('pop-model');
+  pop.innerHTML = '<div class="ph">Model · asking the provider…</div>';
+  placePop(pop, anchor, 'right');
+  const models = await loadLiveModels(false);
+  renderModelPop(anchor, models, '');
+}
+
+function renderModelPop(anchor, models, filter) {
+  const pop = $('pop-model');
+  const q = String(filter || '').toLowerCase();
+  const live = models.filter(m => !q || String(m).toLowerCase().includes(q));
+  const presets = CATALOG.filter(c => !models.includes(c.model) && (!q || c.label.toLowerCase().includes(q) || c.model.toLowerCase().includes(q)));
+
+  pop.innerHTML = `
+    <div class="ph" style="display:flex;align-items:center;gap:6px">
+      <span>Model · ${models.length} available</span>
+      <span style="flex:1"></span>
+      <button class="tinybtn" id="mp-refresh" title="Ask the provider again">refresh</button>
+    </div>
+    <div style="padding:4px 6px 6px"><input id="mp-search" placeholder="filter models" value="${esc(filter || '')}"
+      style="width:100%;background:var(--panel2);border:1px solid var(--border-strong);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;font-family:var(--mono);outline:none"></div>`;
+
+  const list = add(pop, 'div', '');
+  list.style.cssText = 'max-height:260px;overflow:auto';
+  if (!live.length) {
+    add(list, 'div', 'pi', `<div class="ds">No model matched. ${models.length ? 'Try another filter.' : 'The endpoint returned nothing — check the key in Settings → Providers.'}</div>`);
+  }
+  for (const id of live) {
+    const d = add(list, 'div', 'pi' + (id === currentModel ? ' sel' : ''));
+    d.innerHTML = `<div class="r"><span class="nm">${esc(id)}</span>${id === currentModel ? '<span class="tag">current</span>' : ''}</div>`;
+    d.onclick = () => { closePops(); switchToModel(id); };
+  }
+
+  if (presets.length) {
+    add(pop, 'div', 'sep');
+    add(pop, 'div', 'ph', 'Other providers (presets)');
+    const pl = add(pop, 'div', '');
+    pl.style.cssText = 'max-height:150px;overflow:auto';
+    for (const m of presets) {
+      const d = add(pl, 'div', 'pi');
+      d.innerHTML = `<div class="r"><span class="nm">${esc(m.label)}</span><span class="tag">${esc(m.provider)}</span></div>`;
+      d.onclick = () => { closePops(); applyModel(m); };
+    }
+  }
+
+  add(pop, 'div', 'sep');
+  add(pop, 'div', 'ph', 'Reasoning effort');
+  for (const lvl of ['auto', 'low', 'medium', 'high']) {
+    const d = add(pop, 'div', 'pi' + (lvl === reasoning ? ' sel' : ''), `<span class="nm">${lvl[0].toUpperCase() + lvl.slice(1)}</span>`);
+    d.onclick = () => { closePops(); applyReasoning(lvl); };
+  }
+
+  const search = pop.querySelector('#mp-search');
+  if (search) {
+    search.addEventListener('input', () => {
+      const pos = search.selectionStart;
+      renderModelPop(anchor, models, search.value);
+      const again = $('mp-search');
+      if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch { /* noop */ } }
+    });
+    search.focus();
+  }
+  const refresh = pop.querySelector('#mp-refresh');
+  if (refresh) refresh.onclick = async (e) => {
+    e.stopPropagation();
+    refresh.textContent = '…';
+    const fresh = await loadLiveModels(true);
+    renderModelPop(anchor, fresh, filter || '');
+    toast(fresh.length ? fresh.length + ' models from the endpoint' : 'the endpoint returned no models');
+  };
+  placePop(pop, anchor, 'right');
+}
+
+/** Switch to a model the provider actually listed (same provider/endpoint). */
+async function switchToModel(id) {
+  const { status, data } = await api('/model/switch', 'POST', { model: id });
+  if (status === 200 && data.success) {
+    currentModel = id;
+    renderModel();
+    liveKeyInvalidate();
+    toast('model → ' + id);
+  } else {
+    toast('switch failed: ' + (data.error || status));
+  }
+}
+function liveKeyInvalidate() { LIVE_KEY = ''; }
 async function applyModel(m){
   const {status,data}=await api('/config','POST',{
     'engine.model':m.model,'engine.provider':m.provider,'engine.endpoint':m.endpoint
   });
   if(status===200&&data.success){
-    currentModel=m.model;renderModel();toast('model → '+m.model);
+    currentModel=m.model;currentEndpoint=m.endpoint||currentEndpoint;renderModel();liveKeyInvalidate();toast('model → '+m.model);
   }else toast('failed: '+(data.error||status));
 }
 async function applyReasoning(lvl){

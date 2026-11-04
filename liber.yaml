@@ -23,7 +23,7 @@ agent:
     #               key: GEMINI_API_KEY · model: gemini-2.5-pro
     # Put the key in .env (or your environment) — never in this file.
     provider: "openai" # Uses openai-adapter compatible with Ollama Cloud
-    model: "kimi-k2.7-code" # Active cloud model
+    model: "glm-5.3-flash" # Active cloud model
     endpoint: "https://ollama.com/v1" # Ollama Cloud endpoint
     apiKey: "${OLLAMA_CLOUD_API_KEY}" # Loaded automatically from .env or environment
     temperature: 0.2
