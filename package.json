@@ -1,6 +1,6 @@
 {
   "name": "@arthovlabs/liber",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "LiBER — autonomous agent orchestrator with a machine-enforced grounding gate and a skill library",
   "bin": {
     "liber": "bin/liber",

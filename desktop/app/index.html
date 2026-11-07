@@ -1126,6 +1126,23 @@ let ctxChips=[];
 let lastUserText='';
 let turnStart=0,stepCount=0;
 const $=id=>document.getElementById(id);
+
+/* ── auto-scroll that respects the reader ──────────────────────────────
+   New output should follow itself (Merlin does this). But if the operator scrolled
+   up to read something, yanking them back to the bottom on the next token is worse
+   than no auto-scroll at all — so the view sticks only while it is already near the
+   bottom, and a fresh send always snaps down. */
+let stickBottom = true;
+function nearBottom(el){ return el.scrollHeight - el.scrollTop - el.clientHeight < 90; }
+function autoScroll(force){
+  const el=$('stream');
+  if(!el) return;
+  if(force || stickBottom) el.scrollTop = el.scrollHeight;
+}
+document.addEventListener('scroll', e=>{
+  const el=e.target;
+  if(el && el.id==='stream') stickBottom = nearBottom(el);
+}, true);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 /* ── token bootstrap ─────────────────────────── */
@@ -1362,6 +1379,7 @@ function step(parent,kind,label,body){
   add(d,'summary','',label);
   add(d,'pre','',body||'');
   stepCount++;
+  autoScroll();
   return d;
 }
 function answerBlock(parent,text){
@@ -1473,6 +1491,8 @@ async function runTurn(message, opts = {}){
     $('crumb').innerHTML='<span>dev-bot</span><span class="sep">›</span><b>'+esc(sess.title)+'</b>';
   }
   const turn=newTurn();
+  stickBottom=true;                    // a new message is an explicit intent to follow
+  autoScroll(true);
   turnStart=Date.now();stepCount=0;
   const meta=add(turn,'div','worked','working…');
   const stepsWrap=add(turn,'div');
@@ -1488,7 +1508,7 @@ async function runTurn(message, opts = {}){
   turnCtl=new AbortController();
 
   let answerEl=null,gotFinal=false,think=null,thinkBody=null,thinkRaw='',todoEl=null,todoBody=null,draftBuf='';
-  const paintThink=()=>{if(thinkBody)thinkBody.textContent=tidyThink(thinkRaw);};
+  const paintThink=()=>{if(thinkBody){thinkBody.textContent=tidyThink(thinkRaw);autoScroll();}};
   const ensureThink=(live)=>{
     if(think)return;
     think=add(turn,'details','think'+(live?' live':''));
@@ -1510,7 +1530,7 @@ async function runTurn(message, opts = {}){
         thinkRaw+=payload.delta||'';
         paintThink();
         thinkBody.scrollTop=thinkBody.scrollHeight;
-        $('stream').scrollTop=$('stream').scrollHeight;
+        autoScroll();
       }
     }else if(name==='reasoning_end'){
       closeThink();
@@ -1529,7 +1549,7 @@ async function runTurn(message, opts = {}){
         const glyph=st==='completed'?'✓':(st==='in_progress'?'◐':'○');
         return `<div class="todo-i ${st}"><span class="todo-g">${glyph}</span><span>${esc(t.task||'')}</span></div>`;
       }).join('');
-      $('stream').scrollTop=$('stream').scrollHeight;
+      autoScroll();
     }else if(name==='thought'){
       /* non-streamed models think in [THOUGHT: …] blocks — same block, appended per step */
       ensureThink(false);
@@ -1594,7 +1614,7 @@ async function runTurn(message, opts = {}){
       if(!answerEl){answerEl=add(turn,'div','answer','');answerEl.classList.add('streaming');}
       answerEl.textContent=vis;
       answerEl.style.display=vis?'':'none';
-      $('stream').scrollTop=$('stream').scrollHeight;
+      autoScroll();
     }else if(name==='final'){
       gotFinal=true;
       closeThink();
@@ -1611,6 +1631,7 @@ async function runTurn(message, opts = {}){
       if(answerEl&&answerEl.isConnected)answerEl.remove();
       if(payload.response) answerBlock(turn,payload.response);
       if(payload.grounding) audit(turn,payload.grounding);
+      autoScroll(true);
       speakFinal(payload.response);
     }else if(name==='error'){
       step(stepsWrap,'obs','✖ ERROR',payload.error||'');
@@ -1672,7 +1693,7 @@ async function runTurn(message, opts = {}){
   $('send-btn').title='Send (Enter)';
   $('send-btn').classList.remove('stopping');
   loadWorkspace().catch(()=>{});
-  $('stream').scrollTop=$('stream').scrollHeight;
+  autoScroll();
 }
 
 /** Stop the in-flight turn. Two things have to happen: we stop reading, and the
@@ -1706,7 +1727,7 @@ function showHitl(turn,payload){
       el.remove();
     };
   });
-  $('stream').scrollTop=$('stream').scrollHeight;
+  autoScroll();
 }
 
 /* ── interrupted turns: offer the journal back instead of dropping it ── */
