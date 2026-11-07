@@ -42,10 +42,19 @@ function branch() {
  */
 function changedFiles(limit = 40) {
   if (!isGitRepo()) return [];
-  const status = sh('git', ['status', '--porcelain=v1', '--untracked-files=all']);
-  if (!status) return [];
+  // --untracked-files=all walked the entire parent repository on every poll (the
+  // data directory lives inside the user's home repo). Cap it in time and breadth:
+  // a workspace view needs the shape of the change, not an exhaustive census.
+  const status = sh('git', ['status', '--porcelain=v1', '--untracked-files=normal'], { timeout: 1500 });
+  if (!status) {
+    // Timed out: this directory sits in a repository too large to walk per request.
+    // Remember that, so the next polls hit the cache instead of stalling again.
+    _slowRepo = true;
+    return [];
+  }
+  _slowRepo = false;
 
-  const numstat = sh('git', ['diff', '--numstat', 'HEAD']) || '';
+  const numstat = sh('git', ['diff', '--numstat', 'HEAD'], { timeout: 1500 }) || '';
   const stats = new Map();
   for (const line of numstat.split('\n')) {
     const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
@@ -78,12 +87,24 @@ function changedFiles(limit = 40) {
 }
 
 function summary(limit = 40) {
+  // Polled every 20 s by the shell. On a machine whose data directory sits inside a
+  // large parent repository (a home directory that happens to be a git repo), the
+  // status walk cost seconds per poll and starved every other request. Cache it.
+  const now = Date.now();
+  // A repository too large to walk gets a much longer TTL: the view is cached for a
+  // minute instead of four seconds, and says it was truncated rather than pretending.
+  const ttl = _slowRepo ? 60000 : 4000;
+  // Keyed by directory: a workspace switch (or a test) must not read the previous
+  // repository's answer from the cache.
+  if (_summaryCache.value && _summaryCache.cwd === process.cwd() && now - _summaryCache.at < ttl) return _summaryCache.value;
+
   const files = changedFiles(limit);
   const git = isGitRepo();
-  return {
+  const value = {
     cwd: process.cwd(),
     is_git: git,
     branch: git ? branch() : null,
+    truncated: _slowRepo,
     changed_files: files,
     totals: {
       files: files.length,
@@ -91,7 +112,11 @@ function summary(limit = 40) {
       deletions: files.reduce((a, f) => a + (f.deletions || 0), 0)
     }
   };
+  _summaryCache = { at: now, cwd: process.cwd(), value };
+  return value;
 }
+let _summaryCache = { at: 0, value: null };
+let _slowRepo = false;
 
 /** Record one tool step the engine actually ran (fed from turn events). */
 function record(event) {

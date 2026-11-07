@@ -109,3 +109,20 @@ test('sharing a session that does not exist is refused', async () => {
   });
   assert.strictEqual(res.status, 404);
 });
+
+test('the endpoints the shell polls answer fast enough to be polled', async () => {
+  const auth = { Authorization: `Bearer ${token}` };
+
+  // Cold: the docker probe may take up to its timeout once.
+  await fetch(`${base}/sandbox`, { headers: auth });
+
+  let t0 = Date.now();
+  await fetch(`${base}/sandbox`, { headers: auth });
+  const sandboxMs = Date.now() - t0;
+  assert.ok(sandboxMs < 500, `warm /sandbox took ${sandboxMs}ms — it is probing synchronously again`);
+
+  t0 = Date.now();
+  await fetch(`${base}/workspace`, { headers: auth });
+  const workspaceMs = Date.now() - t0;
+  assert.ok(workspaceMs < 2500, `warm /workspace took ${workspaceMs}ms`);
+});

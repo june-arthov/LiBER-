@@ -11,6 +11,10 @@ const DIRS = ['src', 'bin', 'scripts', 'skills'];
 const FILES = ['liber.yaml', '.env.example'];
 const EXT = /\.(js|py|sh|yaml|yml|json)$/;
 
+// Whole words only. A substring match flagged 'synchronous' and 'asynchronous' as a
+// reference to 'nous', which turned a provenance guard into a ban on ordinary English.
+const FORBIDDEN = /\b(merlin|hermes|nous)\b/i;
+
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name);
@@ -27,12 +31,12 @@ test('no Merlin/Hermes/Nous references anywhere in code or config', () => {
     if (!fs.existsSync(abs)) continue;
     for (const file of walk(abs)) {
       const text = fs.readFileSync(file, 'utf8');
-      if (/(merlin|hermes|nous)/i.test(text)) offenders.push(path.relative(ROOT, file));
+      if (FORBIDDEN.test(text)) offenders.push(path.relative(ROOT, file));
     }
   }
   for (const f of FILES) {
     const abs = path.join(ROOT, f);
-    if (fs.existsSync(abs) && /(merlin|hermes|nous)/i.test(fs.readFileSync(abs, 'utf8'))) {
+    if (fs.existsSync(abs) && FORBIDDEN.test(fs.readFileSync(abs, 'utf8'))) {
       offenders.push(f);
     }
   }

@@ -301,43 +301,88 @@ function containerPolicy() {
   };
 }
 
-let _dockerCache = null;
-/** Is a Docker daemon reachable? Cached for a minute; the check costs ~50ms. */
-function containerAvailable(force = false) {
-  if (!force && _dockerCache && Date.now() - _dockerCache.at < 60_000) return _dockerCache.ok;
-  let ok = false;
-  try {
-    const out = require('child_process').execFileSync('docker', ['version', '--format', '{{.Server.Version}}'],
-      { timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
-    ok = String(out).trim().length > 0;
-  } catch { ok = false; }
-  _dockerCache = { ok, at: Date.now() };
-  return ok;
+let _dockerCache = { ok: false, at: 0, checked: false, version: null };
+let _wslCache = { ok: false, at: 0, checked: false };
+
+/**
+ * Cached answer only — never probes. The probe is a synchronous child process and
+ * blocks the whole daemon: this used to cost 8 s per call, so a single /sandbox poll
+ * made /workspace look like it took 12 s and the UI piled requests on top of it.
+ */
+function containerAvailable() {
+  return _dockerCache.checked && _dockerCache.ok;
+}
+
+/** Last probe result, without touching the runtime. */
+function containerSnapshot() {
+  return { ..._dockerCache };
+}
+
+/**
+ * Probe docker (and wsl) asynchronously and cache the result. Safe to call on every
+ * /sandbox: within the TTL it returns immediately, and it never blocks the event loop.
+ */
+async function probeContainers({ force = false } = {}) {
+  const TTL = 60_000;
+  if (!force && _dockerCache.checked && Date.now() - _dockerCache.at < TTL) return containerSnapshot();
+
+  const { execFile } = require('child_process');
+  const run = (file, args, timeout) => new Promise((resolve) => {
+    execFile(file, args, { timeout, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] },
+      (err, stdout) => resolve(err ? null : String(stdout || '').trim()));
+  });
+
+  const version = await run('docker', ['version', '--format', '{{.Server.Version}}'], 1500);
+  _dockerCache = { ok: !!version, at: Date.now(), checked: true, version: version || null };
+
+  if (!_dockerCache.ok) {
+    _runCache = { ok: false, image: (_runCache && _runCache.image) || 'alpine:latest', at: Date.now(), error: 'docker daemon not reachable' };
+  }
+
+  const wsl = process.platform === 'win32' ? await run('wsl.exe', ['-l', '-q'], 2000) : '';
+  _wslCache = { ok: !!wsl && wsl.replace(/\0/g, '').trim().length > 0, at: Date.now(), checked: true };
+
+  return containerSnapshot();
+}
+
+function wslAvailable() {
+  return _wslCache.checked && _wslCache.ok;
 }
 
 let _runCache = null;
 /**
  * Can this machine actually START a container with the configured image?
- * A reachable daemon is not the same thing: a CI runner can have the CLI and a
- * server version and still refuse to run (no image, no permissions). Checking by
- * running is the only honest answer, and it is cached because it costs ~1s.
+ * Reads the cache only; `probeContainers()` is what fills it, including the far more
+ * expensive "run something" check (a reachable daemon can still refuse to run).
  */
 function containerUsable(force = false, image = 'alpine:latest') {
-  if (!force && _runCache && _runCache.image === image && Date.now() - _runCache.at < 300_000) return _runCache;
-  if (!containerAvailable(force)) {
+  if (_runCache && _runCache.image === image && Date.now() - _runCache.at < 300_000) return _runCache;
+  if (!containerAvailable()) {
     _runCache = { ok: false, image, at: Date.now(), error: 'docker daemon not reachable' };
     return _runCache;
   }
-  let ok = false;
-  let error = null;
+  // Daemon is up but nothing has proven it can run this image yet: probe in the
+  // background and fail closed for now rather than blocking the caller.
+  probeRun(image).catch(() => {});
+  _runCache = { ok: false, image, at: Date.now(), error: 'container run not verified yet' };
+  return _runCache;
+}
+
+let _probingRun = false;
+async function probeRun(image = 'alpine:latest') {
+  if (_probingRun) return _runCache;
+  _probingRun = true;
   try {
-    require('child_process').execFileSync('docker', ['run', '--rm', '--network', 'none', image, 'true'],
-      { timeout: 60000, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-    ok = true;
-  } catch (e) {
-    error = String(e.stderr || e.message || 'container run failed').slice(0, 200);
+    const { execFile } = require('child_process');
+    const ok = await new Promise((resolve) => {
+      execFile('docker', ['run', '--rm', '--network', 'none', image, 'true'],
+        { timeout: 20000, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] },
+        (err) => resolve(!err));
+    });
+    _runCache = { ok, image, at: Date.now(), error: ok ? null : 'container run failed' };
+  } finally {
+    _probingRun = false;
   }
-  _runCache = { ok, image, at: Date.now(), error };
   return _runCache;
 }
 
@@ -516,5 +561,8 @@ module.exports = {
   sandboxEnv,
   containerPolicy,
   containerAvailable,
+  containerSnapshot,
+  probeContainers,
+  wslAvailable,
   containerUsable
 };

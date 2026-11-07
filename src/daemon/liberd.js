@@ -17,6 +17,22 @@ const guard = require('./core/http-guard');
 
 // ceiling for the routes that answer without a token
 const unauth = guard.createThrottle();
+
+// A shell that polls without a token used to write one log line per request: 12,239
+// of them in a day. Keep the signal, drop the flood.
+const authFailLog = new Map();
+function logAuthFailure(endpoint, ip) {
+  const key = endpoint + '|' + ip;
+  const now = Date.now();
+  const prev = authFailLog.get(key) || { at: 0, count: 0 };
+  if (now - prev.at > 60000) {
+    logger.warn('SYSTEM', 'AUTH_FAILED', { endpoint, ip, suppressed_since_last: prev.count });
+    authFailLog.set(key, { at: now, count: 0 });
+  } else {
+    prev.count += 1;
+    authFailLog.set(key, prev);
+  }
+}
 const policy = require('./core/policy');
 const journal = require('./core/journal');
 const modelSwitch = require('./core/model-switch');
@@ -249,6 +265,9 @@ class LiberDaemon {
       const bind = () => {
         this.server.listen(this.port, host, () => {
           logger.info('SYSTEM', 'DAEMON_START', { port: this.port, host, cwd: process.cwd() });
+          // Warm the sandbox probe so the first /sandbox (the shell asks on boot) does
+          // not have to wait for docker to answer — or for it to time out.
+          try { require('./core/tools/terminal-tool').probeContainers().catch(() => {}); } catch { /* tool not loaded */ }
         });
       };
       this.server.on('error', (err) => {
@@ -415,7 +434,7 @@ class LiberDaemon {
         success: false,
         error: 'Unauthorized. Send Authorization: Bearer <token>. The desktop token lives in .liber/daemon.token; other clients get their own from /clients (scope admin).'
       }));
-      logger.warn('SYSTEM', 'AUTH_FAILED', { endpoint, ip: req.socket.remoteAddress });
+      logAuthFailure(endpoint, req.socket.remoteAddress);
       auth.audit({ client: null, ip: req.socket.remoteAddress, method: req.method, endpoint, decision: 'deny', reason: 'bad token' });
       return;
     }
@@ -933,18 +952,13 @@ class LiberDaemon {
         if (req.method === 'GET') {
           const term = policy.terminalConfig();
           const terminalTool = require('./core/tools/terminal-tool');
-          const dockerOk = terminalTool.containerAvailable(true);
-          let dockerVersion = null;
-          if (dockerOk) {
-            try {
-              dockerVersion = String(require('child_process').execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], { timeout: 8000, windowsHide: true })).trim();
-            } catch { dockerVersion = null; }
-          }
-          let wsl = false;
-          try {
-            const out = require('child_process').execFileSync('wsl.exe', ['-l', '-q'], { timeout: 8000, windowsHide: true });
-            wsl = String(out).replace(/\0/g, '').trim().length > 0;
-          } catch { wsl = false; }
+          // Probing docker synchronously here used to block the whole daemon for 8 s
+          // (plus 8 s for wsl), which made every other poll look stalled. The probe is
+          // now async and cached; on a warm cache this returns in microseconds.
+          const snap = await terminalTool.probeContainers();
+          const dockerOk = snap.ok;
+          const dockerVersion = snap.version;
+          const wsl = terminalTool.wslAvailable();
           res.end(JSON.stringify({
             success: true,
             backend: term.backend,
