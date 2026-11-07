@@ -1033,6 +1033,7 @@ kbd{font-family:var(--kbd);font-size:10.5px;padding:1px 5px;border:.5px solid va
         <div class="cmeta">
           <button class="br" id="btn-checkout" title="Choose the local folder this session works in"><span class="ico">⌂</span> Local Checkout</button>
           <button class="br" id="btn-branch" title="Switch branch, fetch origin, open on GitHub"><span class="ico">⑂</span> <b id="branch-label">—</b></button>
+          <button class="br" id="btn-sandbox" title="Where commands run"><span class="ico">▣</span> <b id="sandbox-label">—</b></button>
           <span class="grow"></span>
           <span id="foot-status"></span>
         </div>
@@ -1251,7 +1252,27 @@ async function loadWorkspace(){
   $('ov-cwd').textContent=w.cwd||'';
   const sideCwd=$('side-cwd'); if(sideCwd) sideCwd.textContent=w.cwd||'local checkout';
   renderReview(w);renderActivity(data?.activity||[]);
+  paintSandbox().catch(()=>{});
   return w;
+}
+
+/** Say where commands actually run. A silent downgrade from container to language
+ *  mode is the difference between 'sandboxed' and 'not sandboxed at all'. */
+async function paintSandbox(){
+  const el=$('sandbox-label'); if(!el) return;
+  const r=await api('/sandbox').catch(()=>null);
+  const d=r&&r.data; if(!d||!d.success) return;
+  const caps=d.capabilities||{};
+  if(caps.docker){
+    el.textContent='container';
+    el.style.color='var(--green)';
+    el.parentElement.title='Commands run in Docker: no network, read-only root, only the workspace mounted.';
+  }else{
+    el.textContent='no container';
+    el.style.color='var(--amber)';
+    el.parentElement.title=(d.note||'Commands run in Constrained Language Mode, not a container.')
+      +'\nDocker Desktop must be running for the container backend.';
+  }
 }
 function renderReview(w){
   const files=w.changed_files||[];

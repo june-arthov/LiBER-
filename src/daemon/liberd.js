@@ -12,6 +12,11 @@ const trace = require('./core/trace');
 const auth = require('./core/auth');
 const shares = require('./core/shares');
 const stops = require('./core/stops');
+
+const guard = require('./core/http-guard');
+
+// ceiling for the routes that answer without a token
+const unauth = guard.createThrottle();
 const policy = require('./core/policy');
 const journal = require('./core/journal');
 const modelSwitch = require('./core/model-switch');
@@ -325,16 +330,35 @@ class LiberDaemon {
     const endpoint = url.pathname;
     res.setHeader('Content-Type', 'application/json');
 
-    // CORS for the desktop shell (Neutralino/WebView2 origin) and any local client.
-    // The daemon binds to loopback and every stateful endpoint still requires the
-    // bearer token, so a wildcard origin does not weaken access control.
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // CORS: reflect only loopback origins. The shell is served from
+    // http://127.0.0.1:<port> (or localhost), so that is the whole allowlist.
+    // A wildcard used to be harmless only because of the bearer token; removing
+    // it means a page the user happens to visit cannot even attempt the call.
+    const origin = String(req.headers.origin || '');
+    const allowed = guard.allowOrigin(req.headers.origin);
+    if (allowed) {
+      res.setHeader('Access-Control-Allow-Origin', allowed);
+      res.setHeader('Vary', 'Origin');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     if (req.method === 'OPTIONS') {
       res.statusCode = 204;
       res.end();
       return;
+    }
+
+    // The unauthenticated routes need a ceiling of their own: without a token there
+    // is nothing else to throttle against. 240/min per address is far above what a
+    // shell does and far below what a probe wants.
+    if (endpoint === '/healthz' || endpoint === '/whoami' || endpoint.startsWith('/shared/')) {
+      const gate = unauth.check(req.socket.remoteAddress || 'local');
+      if (!gate.allowed) {
+        res.statusCode = 429;
+        res.setHeader('retry-after', Math.ceil(gate.retryAfterMs / 1000));
+        res.end(JSON.stringify({ success: false, error: 'Too many requests without a token.' }));
+        return;
+      }
     }
 
     // Unauthenticated liveness probe only — it exposes no state.
@@ -366,6 +390,9 @@ class LiberDaemon {
     // sanitized, with no tool output and no path from this machine.
     if (req.method === 'GET' && endpoint.startsWith('/shared/')) {
       const id = endpoint.slice('/shared/'.length);
+      // A revoked link must stop working in the browser too, not only on the wire:
+      // without this a cached copy keeps answering after DELETE /sessions/share.
+      res.setHeader('Cache-Control', 'no-store');
       const record = shares.resolve(id);
       if (!record) {
         res.statusCode = 404;

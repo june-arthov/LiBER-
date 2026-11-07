@@ -34,6 +34,7 @@ function write(state) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const tmp = target + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
+  try { fs.chmodSync(tmp, 0o600); } catch { /* Windows has no POSIX mode; its ACL applies */ }
   fs.renameSync(tmp, target);
 }
 
