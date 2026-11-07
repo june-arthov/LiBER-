@@ -1524,6 +1524,32 @@ async function runTurn(message, opts = {}){
       step(stepsWrap,'obs','✔ APPROVED',payload.retried?'Re-dispatched after your approval.':'Approved by you.');
     }else if(name==='loop_guard'){
       step(stepsWrap,'obs','⟳ LOOP GUARD · '+esc(payload.tool||''),'Duplicate/empty action suppressed.');
+    }else if(name==='grounding_pass'){
+      step(stepsWrap,'obs','✔ GROUNDING PASS',
+        `${payload.receipts||0} receipt(s) · ${payload.claims||0} claim(s) checked`);
+    }else if(name==='grounding_warning'){
+      // A warning-level audit still ships the answer, so the reader has to be able to
+      // see that something was not fully verified — silence here reads as 'clean'.
+      step(stepsWrap,'obs','⚠ GROUNDING WARNING',
+        esc(String(payload.reason||payload.detail||'Some claims could not be verified.')));
+    }else if(name==='injection_warning'){
+      step(stepsWrap,'obs','⚠ INJECTION SCAN',
+        esc(String(payload.detail||payload.reason||'Tool output looked like instructions; it was not followed.')));
+    }else if(name==='budget_blocked'){
+      step(stepsWrap,'obs','⛔ BUDGET BLOCKED', esc(String(payload.reason||'Daily budget exhausted.')));
+      toast('budget blocked: '+(payload.reason||'daily limit reached'));
+    }else if(name==='subagent_start'){
+      step(stepsWrap,'obs','↳ SUBAGENT '+esc(String(payload.id||'')),
+        esc(String(payload.goal||'delegated work')).slice(0,140));
+    }else if(name==='subagent_end'){
+      step(stepsWrap,'obs','↲ SUBAGENT DONE '+esc(String(payload.id||'')),
+        esc(String(payload.summary||'')).slice(0,140));
+    }else if(name==='native_tools_unavailable'){
+      step(stepsWrap,'obs','⇄ TEXT PROTOCOL',
+        'Native tool calling was refused; falling back to the text protocol for this turn.');
+    }else if(name==='start'||name==='draft_end'||name==='done'||name==='telemetry'){
+      /* lifecycle and telemetry: nothing to draw, but handled on purpose so an
+         unknown event is never silently swallowed */
     }else if(name==='grounding_audit'){
       step(stepsWrap,'obs',`🛠 GROUNDING REPAIR ${payload.attempt||1}/${payload.max_repairs||2}`,'Blocked unverified claims are being corrected.');
     }else if(name==='converging'){
@@ -1560,6 +1586,10 @@ async function runTurn(message, opts = {}){
       speakFinal(payload.response);
     }else if(name==='error'){
       step(stepsWrap,'obs','✖ ERROR',payload.error||'');
+    }else if(name){
+      // Unknown event: show it instead of dropping it. A silent drop is how a broken
+      // contract hides — the turn looks finished while part of it never rendered.
+      step(stepsWrap,'obs','· '+esc(String(name)), JSON.stringify(payload||{}).slice(0,140));
     }
   };
 
