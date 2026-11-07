@@ -979,7 +979,7 @@ kbd{font-family:var(--kbd);font-size:10.5px;padding:1px 5px;border:.5px solid va
   <aside class="sidebar" id="sidebar">
     <div class="brand-row">
       <span class="brand-logo"><span class="bl-mark">◢</span><span class="bl-word">L i B E R</span><span class="bl-mark bl-close">◣</span></span>
-      <span class="brand-ver">v0.5</span>
+      <span class="brand-ver" id="brand-ver">v—</span>
     </div>
     <button class="newchat" id="new-conv"><span class="plus">＋</span><span class="lbl">New session</span><span class="kbd">Ctrl N</span></button>
     <div class="sidebar-scroll">
@@ -1134,7 +1134,14 @@ async function loadToken(){
   try{
     const c=new AbortController();const t=setTimeout(()=>c.abort(),2500);
     const r=await fetch(DAEMON+'/whoami',{signal:c.signal});clearTimeout(t);
-    if(r.ok){const j=await r.json();tokenPath=j.token_path||null;cwd=j.cwd||'';}
+    if(r.ok){
+      const j=await r.json();
+      tokenPath=j.token_path||null;
+      cwd=j.cwd||'';
+      // The badge used to be a hardcoded 'v0.5' that survived four releases.
+      const badge=$('brand-ver');
+      if(badge&&j.version){badge.textContent='v'+j.version;badge.title='daemon '+j.version+' · '+(j.platform||'');}
+    }
   }catch{}
   if(window.Neutralino){
     try{
@@ -4041,6 +4048,10 @@ function importSourceHint(id){
   await loadWorkspace().catch(()=>{});
   await loadSkills().catch(()=>{});
   loadSessionState();
+  // The sidebar list is local; the messages live in the daemon. Without this the
+  // window opens with an empty history even though every session is still on disk —
+  // which reads as 'lost everything' to the person looking at it.
+  await syncSessionsFromDaemon().catch(()=>{});
   paintSession();
   await loadProjects().catch(()=>{});
   checkInterrupted().catch(()=>{});
