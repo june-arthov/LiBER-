@@ -44,3 +44,4 @@ desktop/bin/
 # installer staging output
 installer/payload/
 installer/dist/
+scratch-ui.js
