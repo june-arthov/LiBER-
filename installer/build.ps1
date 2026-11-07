@@ -9,6 +9,7 @@
 #   runtime\node.exe                   bundled interpreter (skip with -SkipNode)
 param(
   [switch]$SkipNode,
+  [switch]$SkipShell,
   [string]$Out = "$PSScriptRoot\payload"
 )
 
@@ -17,12 +18,37 @@ $root = Split-Path -Parent $PSScriptRoot
 function Say($m) { Write-Host "[build] $m" -ForegroundColor Cyan }
 function Fail($m) { Write-Host "[build] FAIL $m" -ForegroundColor Red; exit 1 }
 
-# 1. the desktop shell must exist before we can install it
+# 1. the desktop shell. This used to be assumed: resources.neu was built once and
+# then shipped for four releases while desktop/app kept changing, so the installer
+# carried a v0.5 UI. Rebuild it here, and refuse to package a bundle older than the
+# source it is supposed to contain.
 $shellDir = Join-Path $root 'desktop\dist\liber-desktop'
 $exe = Join-Path $shellDir 'LiBER.exe'
 $res = Join-Path $shellDir 'resources.neu'
+$appDir = Join-Path $root 'desktop\app'
+
+if (-not $SkipShell) {
+  $neu = Join-Path $root 'desktop\node_modules\.bin\neu.cmd'
+  if (-not (Test-Path $neu)) { Fail 'neu CLI missing — run: cd desktop; npm install' }
+  Say 'building the desktop shell (neu build)'
+  Push-Location (Join-Path $root 'desktop')
+  try {
+    & $neu build 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail 'neu build failed' }
+  } finally { Pop-Location }
+}
+
 if (-not (Test-Path $exe)) { Fail "LiBER.exe not built. Run: cd desktop; npx neu build" }
 if (-not (Test-Path $res)) { Fail "resources.neu missing from $shellDir" }
+
+$newestSource = Get-ChildItem $appDir -Recurse -File |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$resTime = (Get-Item $res).LastWriteTime
+if ($newestSource -and $resTime -lt $newestSource.LastWriteTime) {
+  Fail ("resources.neu is older than desktop/app (" + $resTime + " < " + $newestSource.LastWriteTime +
+        "). Drop -SkipShell so the bundle is rebuilt, or run neu build yourself.")
+}
+Say ("shell bundle is current: " + $resTime)
 
 # 2. clean the staging area
 if (Test-Path $Out) { Remove-Item $Out -Recurse -Force }

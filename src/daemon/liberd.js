@@ -36,7 +36,9 @@ const logger = require('../utils/logger');
 class LiberDaemon {
   constructor() {
     this.agents = new Map();
-    this.port = 4567;
+    // LIBER_PORT lets a second instance (or a test) run beside the installed one;
+    // 0 asks the OS for a free port.
+    this.port = process.env.LIBER_PORT !== undefined ? Number(process.env.LIBER_PORT) : 4567;
     this.server = null;
     this.hitlPending = null; // { resolve, agentId, command }
     this.queue = new AgentQueue(); // one turn at a time per agent
