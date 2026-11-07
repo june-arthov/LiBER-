@@ -10,6 +10,8 @@ const registry = require('./core/registry');
 const circuitBreaker = require('./core/circuit-breaker');
 const trace = require('./core/trace');
 const auth = require('./core/auth');
+const shares = require('./core/shares');
+const stops = require('./core/stops');
 const policy = require('./core/policy');
 const journal = require('./core/journal');
 const modelSwitch = require('./core/model-switch');
@@ -359,6 +361,22 @@ class LiberDaemon {
       return;
     }
 
+    // A share link is a capability URL: the 128-bit id is the credential, so this
+    // route answers without a bearer token — and only ever returns one session,
+    // sanitized, with no tool output and no path from this machine.
+    if (req.method === 'GET' && endpoint.startsWith('/shared/')) {
+      const id = endpoint.slice('/shared/'.length);
+      const record = shares.resolve(id);
+      if (!record) {
+        res.statusCode = 404;
+        res.end(JSON.stringify({ success: false, error: 'This link is unknown, expired or revoked.' }));
+        return;
+      }
+      const messages = memory.get(record.key) || [];
+      res.end(JSON.stringify(shares.publicPayload(record, messages)));
+      return;
+    }
+
     // Every request is resolved to a client, then checked for scope and rate.
     const requestStart = Date.now();
     const client = auth.verify(auth.extract(req));
@@ -497,8 +515,56 @@ class LiberDaemon {
         let body = '';
         for await (const chunk of req) body += chunk;
         const { verdict } = JSON.parse(body || '{}');
-        const handled = this.resolveHitl(verdict === 'approve' || verdict === true);
+        const approved = verdict === 'approve' || verdict === true;
+        auth.audit({ client: client.id, endpoint, decision: approved ? 'approve' : 'deny', reason: 'hitl verdict' });
+        const handled = this.resolveHitl(approved);
         res.end(JSON.stringify({ success: true, handled }));
+      }
+      else if (endpoint === '/stop') {
+        // The kill switch. It marks the agent so the engine stops before its next
+        // model call, and kills any command already running for it.
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { agentId } = JSON.parse(body || '{}');
+        if (!agentId) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: 'Missing agentId.' }));
+          return;
+        }
+        const out = stops.request(agentId);
+        logger.warn(agentId, 'STOP_REQUESTED', { client: client.id, killed: out.killed });
+        auth.audit({ client: client.id, endpoint, decision: 'allow', reason: 'stop ' + agentId, killed: out.killed });
+        res.end(JSON.stringify({ success: true, agentId: out.agentId, killed: out.killed }));
+      }
+      else if (endpoint === '/sessions/share') {
+        if (req.method === 'GET') {
+          res.end(JSON.stringify({ success: true, shares: shares.list() }));
+          return;
+        }
+        if (req.method === 'DELETE') {
+          const id = url.searchParams.get('id');
+          const ok = shares.revoke(id);
+          auth.audit({ client: client.id, endpoint, decision: ok ? 'allow' : 'deny', reason: 'revoke ' + (id || '(none)') });
+          res.statusCode = ok ? 200 : 404;
+          res.end(JSON.stringify({ success: ok, revoked: ok ? id : null }));
+          return;
+        }
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { key, title, ttl_hours } = JSON.parse(body || '{}');
+        if (!key) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ success: false, error: 'Missing session key.' }));
+          return;
+        }
+        if (!(memory.get(key) || []).length) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ success: false, error: 'No such session: ' + key }));
+          return;
+        }
+        const record = shares.create({ key, title, ttlHours: ttl_hours });
+        auth.audit({ client: client.id, endpoint, decision: 'allow', reason: 'share ' + record.id });
+        res.end(JSON.stringify({ success: true, share: record, path: '/shared/' + record.id }));
       }
       else if (endpoint === '/sessions/history') {
         // The window keeps rendered HTML in memory only, so after a restart a
@@ -1283,7 +1349,8 @@ class LiberDaemon {
             onEvent: sendEvent,
             waitForHitl: (aid, toolName, args) => this.waitForHitl(aid, `${toolName}: ${JSON.stringify(args)}`),
             maxLoops: this.maxLoops,
-            shouldStop
+            shouldStop,
+            client: client.id
           }));
           if (this.traceEnabled) {
             trace.appendTurn({ agentId, userMessage: message, result, model: agent.config.engine?.model });
@@ -1307,6 +1374,7 @@ class LiberDaemon {
           memoryKey,
           agentConfig: agent.config,
           userMessage: message,
+          client: client.id,
           memory,
           llmManager,
           // This endpoint answers with one JSON body, so there is no channel to

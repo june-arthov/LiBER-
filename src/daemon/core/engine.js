@@ -10,6 +10,7 @@ const budget = require('./budget');
 const verifier = require('./verifier');
 const journal = require('./journal');
 const injection = require('./injection');
+const stops = require('./stops');
 
 const DEFAULT_GROUNDING = {
   enabled: true,
@@ -398,14 +399,19 @@ class LiberEngine {
     depth = 0,
     allowedTools = null,
     resumeState = null,
-    shouldStop = null
+    shouldStop = null,
+    client = null
   }) {
     const resumed = !!resumeState;
     // The client can hang up mid-turn (stop button / closed window). Checked
     // between iterations so we stop spending tokens as soon as it does.
     const stopRequested = () => {
-      try { return typeof shouldStop === 'function' && shouldStop() === true; } catch { return false; }
+      try { if (typeof shouldStop === 'function' && shouldStop() === true) return true; } catch { /* socket may be gone */ }
+      // A /stop request is honoured even when no socket is watching: that is the
+      // whole point of a kill switch.
+      return stops.isRequested(agentId);
     };
+    stops.clear(agentId);
     let stopped = false;
     // Session history lives under its own key so a new session starts empty;
     // tracing, evidence and the breaker stay keyed to the real agent.
@@ -861,7 +867,7 @@ class LiberEngine {
             seq: ++subSeq
           });
         } else {
-          result = await registry.execute(call.name, call.args);
+          result = await registry.execute(call.name, call.args, { agentId, client: client || null, turnId: ledger.turnId || null });
         }
 
         // A tool can refuse for policy reasons and report that a human may
@@ -875,7 +881,7 @@ class LiberEngine {
           const approved = await waitForHitl(agentId, call.name, call.args);
           if (approved) {
             onEvent('hitl_approved', { tool: call.name, retried: true });
-            result = await registry.execute(call.name, call.args, { approved: true });
+            result = await registry.execute(call.name, call.args, { approved: true, agentId, client: client || null, turnId: ledger.turnId || null });
           } else {
             result = { error: `DENIED: approval was not granted. Tool '${call.name}' did not execute.`, policy_denied: true };
           }

@@ -1589,11 +1589,13 @@ async function runTurn(message, opts = {}){
   $('stream').scrollTop=$('stream').scrollHeight;
 }
 
-/** Abort the in-flight turn. The window stops reading; the daemon notices the
- *  closed connection between iterations and stops spending tokens. */
+/** Stop the in-flight turn. Two things have to happen: we stop reading, and the
+ *  daemon is told, so it stops before the next model call and kills any command
+ *  it is running. Without the second half a script-started turn keeps burning. */
 function stopTurn(){
   if(!turnCtl)return;
   stoppedByUser=true;
+  api('/stop','POST',{agentId:'dev-bot'}).catch(()=>{});
   try{turnCtl.abort();}catch{}
   clearInterruptedBar();
 }
@@ -2379,6 +2381,16 @@ function renderSessions(){
   c2.onclick=()=>newConversation();
 }
 
+/** Create a read-only link for a session and put it on the clipboard. */
+async function shareSession(id){
+  const key = (!id||id==='default') ? 'dev-bot' : 'dev-bot#'+id;
+  const r=await api('/sessions/share','POST',{key});
+  if(r.status!==200||!r.data.success){toast('share failed: '+((r.data&&r.data.error)||r.status));return;}
+  const url=new URL(DAEMON+r.data.path).href;
+  try{await navigator.clipboard.writeText(url);toast('read-only link copied');}
+  catch{toast(url);}
+}
+
 function openSessionMenu(anchor,s){
   const pop=$('pop-menu');
   closePops();
@@ -2386,6 +2398,7 @@ function openSessionMenu(anchor,s){
   pop.style.minWidth='180px';
   pop.innerHTML='';
   const items=[
+    {label:'Share link (read-only)',hint:'',act:()=>shareSession(s.id)},
     {label:'Rename session',hint:'F2',act:()=>startRename(s.id)},
     {label:'Delete session',hint:'',act:()=>deleteSession(s.id)}
   ];
@@ -3387,6 +3400,27 @@ async function renderPanel(){
       <div class="brow"><button class="btn" id="ss-export">Export JSON</button><button class="btn" id="ss-clear">Clear all</button></div>`;
     p.querySelector('#ss-export').onclick=exportSessions;
     p.querySelector('#ss-clear').onclick=async()=>{if(!confirm('Clear all sessions?'))return;await api('/sessions','DELETE');renderPanel();};
+
+    /* Shared links: what exists, when it dies, and how to kill it now. A link is a
+       capability URL — read-only, sanitized server-side, revocable at any time. */
+    const sh=(await api('/sessions/share')).data||{};
+    const links=sh.shares||[];
+    const box=document.createElement('div');
+    const cell=(x)=>`<tr${x.expired?' style="opacity:.45"':''}>`+
+      `<td style="font-family:var(--mono)">${esc(x.key)}</td>`+
+      `<td style="color:var(--dim)">${esc(String(x.expires_at||'').slice(0,16).replace('T',' '))}</td>`+
+      `<td>${x.views||0}</td>`+
+      `<td>${x.revoked?'revoked':`<button class="tinybtn" data-id="${esc(x.id)}">Revoke</button>`}</td></tr>`;
+    box.innerHTML='<div class="dsec">Shared links</div>'+(links.length
+      ? '<table class="tbl"><thead><tr><th>Session</th><th>Expires</th><th>Views</th><th></th></tr></thead><tbody>'+
+        links.map(cell).join('')+'</tbody></table>'
+      : '<div class="pd">No links yet. Right-click a session in the sidebar → Share link (read-only).</div>');
+    p.appendChild(box);
+    box.querySelectorAll('button[data-id]').forEach(b=>b.onclick=async()=>{
+      const r=await api('/sessions/share?id='+encodeURIComponent(b.dataset.id),'DELETE');
+      toast(r.data&&r.data.success?'link revoked':'revoke failed');
+      renderPanel();
+    });
     return;
   }
 
@@ -3395,7 +3429,7 @@ async function renderPanel(){
     const who=(await api('/whoami')).data||{};
     p.innerHTML=`<h3>◢ L i B E R ◣</h3><div class="pd">Autonomous agent orchestrator with machine-enforced grounding.</div>
       <table class="tbl"><tbody>
-      <tr><td style="width:150px">App</td><td>0.5.0 · Neutralino / WebView2</td></tr>
+      <tr><td style="width:150px">App</td><td>${esc(who.version||'')} · Neutralino / WebView2</td></tr>
       <tr><td>Daemon</td><td style="font-family:var(--mono)">${esc(who.cwd||'')}</td></tr>
       <tr><td>Node</td><td>${esc(who.version||'')}</td></tr>
       <tr><td>Platform</td><td>${esc(who.platform||'')} / ${esc(who.arch||'')} · ${who.cpus||'?'} cpus</td></tr>

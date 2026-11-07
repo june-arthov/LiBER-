@@ -70,7 +70,7 @@ policy:
     backend: "docker"
     image: "alpine:latest"
     allow_network: false
-    mode: "allowlist" # read_only: block state-changing commands · allowlist: only the list · prompt: HITL only
+    mode: "prompt" # ask the human for state-changing commands; read-only runs freely
     allowlist: ["npm test", "node --test", "git status", "git diff", "git add", "git commit", "git push"]
     denylist: []
 

@@ -248,12 +248,30 @@ function sandboxEnv() {
   return env;
 }
 
+const stops = require('../stops');
+
+function auditFile(name) {
+  return path.join(path.resolve(process.cwd(), '.liber'), name);
+}
+
+/**
+ * Keep an audit trail readable over months: when the file passes 5 MB it is
+ * rotated once (current -> .1, older .1 discarded). An audit log that grows
+ * without bound is the same as no audit log — nobody reads 200 MB.
+ */
+function rotate(file, maxBytes = 5 * 1024 * 1024) {
+  try {
+    if (fs.statSync(file).size < maxBytes) return;
+    fs.renameSync(file, file + '.1');
+  } catch { /* no file yet, or a rotation race — the append below still works */ }
+}
+
 function auditTerminal(entry) {
   try {
-    const dir = path.resolve(process.cwd(), '.liber');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, 'terminal-audit.log'),
-      new Date().toISOString() + ' ' + JSON.stringify(entry) + '\n', 'utf8');
+    fs.mkdirSync(path.resolve(process.cwd(), '.liber'), { recursive: true });
+    const file = auditFile('terminal-audit.log');
+    rotate(file);
+    fs.appendFileSync(file, new Date().toISOString() + ' ' + JSON.stringify(entry) + '\n', 'utf8');
   } catch { /* auditing must never block a command */ }
 }
 
@@ -323,7 +341,7 @@ function containerUsable(force = false, image = 'alpine:latest') {
   return _runCache;
 }
 
-function runContainer(command, { cwd, timeout, profile }) {
+function runContainer(command, { cwd, timeout, profile, meta = {} }) {
   const { execFile } = require('child_process');
   const mount = `${path.resolve(process.cwd())}:/work:rw`;
   // On POSIX hosts run as the invoking user: files the container writes land
@@ -348,8 +366,9 @@ function runContainer(command, { cwd, timeout, profile }) {
     'sh', '-lc', command
   ];
   return new Promise((resolve) => {
-    execFile('docker', args, { timeout, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
+    const child = execFile('docker', args, { timeout, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
       (error, stdout, stderr) => resolve({ error, stdout: String(stdout || ''), stderr: String(stderr || '') }));
+    stops.track(meta.agentId, child);
   });
 }
 
@@ -357,7 +376,7 @@ function runContainer(command, { cwd, timeout, profile }) {
  * Run under Constrained Language Mode via a throwaway script file. A file avoids
  * every quoting trap that inline -Command has with quotes and $ signs.
  */
-function runSandboxed(command, { cwd, timeout }) {
+function runSandboxed(command, { cwd, timeout, meta = {} }) {
   const { execFile } = require('child_process');
   const tmpDir = path.resolve(process.cwd(), '.liber', 'tmp');
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -368,13 +387,14 @@ function runSandboxed(command, { cwd, timeout }) {
     command + '\n', 'utf8');
 
   return new Promise((resolve) => {
-    execFile('powershell.exe',
+    const child = execFile('powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
       { cwd, timeout, maxBuffer: 10 * 1024 * 1024, windowsHide: true, env: sandboxEnv() },
       (error, stdout, stderr) => {
         try { fs.unlinkSync(script); } catch { }
         resolve({ error, stdout: String(stdout || ''), stderr: String(stderr || '') });
       });
+    stops.track(meta.agentId, child);
   });
 }
 
@@ -383,8 +403,17 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
     return { error: "Missing or invalid command argument." };
   }
 
+  const ctx = { agentId: meta.agentId || null, client: meta.client || null, turnId: meta.turnId || null };
   const decision = evaluatePolicy(command, { approved: meta && meta.approved === true });
   if (decision.denied) {
+    // A refusal is the event an operator most needs to see; it used to leave no trace.
+    auditTerminal({
+      decision: 'deny',
+      command,
+      reason: decision.reason,
+      needs_approval: decision.needs_approval === true,
+      ...ctx
+    });
     // Keep the escalation signal: a consumer (registry/engine) needs to know the
     // difference between "policy says no" and "policy says ask a human".
     return {
@@ -402,7 +431,7 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
   const sandbox = sandboxPolicy();
   const container = containerPolicy();
   const backend = container.on ? 'docker' : (sandbox.on ? 'constrained-language' : 'none');
-  auditTerminal({ decision: 'allow', command, cwd, sandbox: backend });
+  auditTerminal({ decision: 'allow', command, cwd, sandbox: backend, ...ctx });
 
   const finish = (error, stdout, stderr) => {
     const durationMs = Date.now() - startTime;
@@ -416,7 +445,7 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
       truncated = true;
     }
     const exitCode = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-    auditTerminal({ decision: 'run', command, exit_code: exitCode, duration_ms: durationMs, sandbox: backend });
+    auditTerminal({ decision: 'run', command, exit_code: exitCode, duration_ms: durationMs, sandbox: backend, ...ctx });
     if (error) {
       return {
         command,
@@ -448,7 +477,8 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
     const { error, stdout, stderr } = await runContainer(command, {
       cwd,
       timeout: parseInt(timeout, 10) || 45000,
-      profile: container
+      profile: container,
+      meta
     });
     return finish(error, stdout, stderr);
   }
@@ -456,13 +486,14 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
   if (sandbox.on) {
     const { error, stdout, stderr } = await runSandboxed(command, {
       cwd,
-      timeout: parseInt(timeout, 10) || 45000
+      timeout: parseInt(timeout, 10) || 45000,
+      meta
     });
     return finish(error, stdout, stderr);
   }
 
   return new Promise((resolve) => {
-    exec(
+    const child = exec(
       command,
       {
         cwd,
@@ -473,6 +504,7 @@ async function runTerminal({ command, timeout = 45000, cwd = process.cwd() }, me
       },
       (error, stdout, stderr) => resolve(finish(error, stdout, stderr))
     );
+    stops.track(meta.agentId, child);
   });
 }
 

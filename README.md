@@ -373,6 +373,52 @@ Every decision and every run is appended to `.liber/terminal-audit.log`, and
 Docker Desktop must be running for the container backend; when it is not, LiBER
 falls back to Constrained Language Mode and says so instead of pretending.
 
+Each line records `decision` (`allow`, `run` or **`deny`**), the command, the exit
+code and duration, the sandbox in force, and **who asked** — `agentId`, `client`
+and `turnId`. A refusal is the event an operator most needs to see, so it is
+logged with its reason instead of being swallowed. Files rotate at 5 MB
+(current → `.1`) so the trail stays readable.
+
+### Stopping a turn that is already running
+
+`POST /stop {"agentId":"dev-bot"}` is the kill switch. It marks the agent so the
+engine stops **before its next model call**, and it kills any command already
+running for it — on Windows the whole process tree, not just the shell wrapper.
+The turn ends with `stopped: true` and an honest "Stopped by you after N
+iterations. Nothing is claimed as complete." The desktop shell's ■ button calls
+this endpoint as well as aborting its own stream, so a turn started by a script is
+just as stoppable as one started by hand.
+
+## 🔗 Sharing a session (read-only links)
+
+Right-click a session in the sidebar → **Share link**. LiBER mints a 128-bit
+capability URL:
+
+```
+POST   /sessions/share            {"key":"dev-bot#<session>","ttl_hours":168}
+GET    /shared/<id>              no bearer token; the id is the credential
+GET    /sessions/share           list links, expiry and view count
+DELETE /sessions/share?id=<id>   revoke immediately
+```
+
+What a link can and cannot do:
+
+- **read only** — there is no route from a share id to `/chat`, `/config` or any
+  tool, so a leaked link cannot cost you tokens or change anything;
+- **sanitized** — the payload is built server-side: tool observations
+  (`OBSERVATION [E…]`), denials and internal retry prompts are dropped,
+  credentials are redacted, the account path becomes `~`, and long messages are
+  truncated. Rendering-side hiding is not relied on;
+- **expiring** — seven days by default, checked at read time, and revoked links
+  answer 404 rather than a cached copy.
+
+### Kill switch vs. share link
+
+A share link is deliberately *not* a token: it cannot be replayed into the API.
+The only thing it unlocks is `GET /shared/<id>`, once per request, while
+`expires_at` is in the future and `revoked` is false.
+
+
 ---
 
 ## 🔑 Clients and tokens

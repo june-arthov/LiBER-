@@ -21,7 +21,7 @@ const DEFAULT_LIMIT = 240; // requests per minute per client
 function scopeFor(method, endpoint) {
   if (endpoint === '/shutdown' || endpoint.startsWith('/clients')) return 'admin';
   if (endpoint.startsWith('/config') || endpoint === '/vault/migrate') return method === 'GET' ? 'read' : 'admin';
-  if (endpoint === '/chat' || endpoint === '/chat/stream' || endpoint === '/model/switch' || endpoint.endsWith('/run')) return 'chat';
+  if (endpoint === '/chat' || endpoint === '/chat/stream' || endpoint === '/model/switch' || endpoint === '/stop' || endpoint === '/sessions/share' || endpoint.endsWith('/run')) return 'chat';
   if (endpoint.startsWith('/hitl') || endpoint.startsWith('/memory') || endpoint.startsWith('/budget') || endpoint.startsWith('/sessions')) return 'chat';
   if (method === 'GET' || method === 'HEAD') return 'read';
   return 'tools';
@@ -121,6 +121,13 @@ function rateLimit(client, now = Date.now()) {
 function can(client, scope) {
   const list = client?.scopes || [];
   return list.includes('*') || list.includes(scope);
+}
+
+function rotateAudit(file, maxBytes = 5 * 1024 * 1024) {
+  try {
+    if (require('fs').statSync(file).size < maxBytes) return;
+    require('fs').renameSync(file, file + '.1');
+  } catch { /* first write, or a rotation race */ }
 }
 
 function audit(entry) {
