@@ -110,7 +110,19 @@ function splitSegments(command) {
   return out.map(x => x.trim()).filter(Boolean);
 }
 
-const isReadOnly = seg => matchesAllowEntry(READ_ONLY_PREFIXES, String(seg).trim().toLowerCase());
+const isReadOnly = seg => {
+  const lower = String(seg).trim().toLowerCase();
+  if (matchesAllowEntry(READ_ONLY_PREFIXES, lower)) return true;
+  // `... | ForEach-Object { $_.Line.Trim() }` is how anyone projects a field in
+  // PowerShell, and it is read-only as long as the block only touches properties of
+  // the current item. A block that calls a cmdlet, invokes a variable, redirects, or
+  // chains another statement is not a projection and stays blocked.
+  if (/^foreach-object\s*\{[^}]*\}$/i.test(lower) &&
+      !/invoke|start-|remove-|set-|new-|out-file|\$\(|&\s*\$|>/.test(lower)) {
+    return true;
+  }
+  return false;
+};
 
 /**
  * Does `command` start with an allowlist entry and stay *inside* that entry?
