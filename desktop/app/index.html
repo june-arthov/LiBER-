@@ -1130,6 +1130,17 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ── token bootstrap ─────────────────────────── */
 async function loadToken(){
+  // The window is opened by the launcher before the daemon necessarily answers; a
+  // single failed read used to leave the app unpaired for the rest of its life.
+  for(let attempt=0;attempt<15;attempt++){
+    if(await loadTokenOnce()) return true;
+    if(!window.Neutralino) break;
+    await new Promise(r=>setTimeout(r,2000));
+  }
+  if(!token){ const t=document.getElementById('foot-status'); if(t) t.textContent='not paired with the daemon — run: liber spawn'; toast('not paired with the daemon'); }
+  return false;
+}
+async function loadTokenOnce(){
   let tokenPath=null;
   try{
     const c=new AbortController();const t=setTimeout(()=>c.abort(),2500);
@@ -1157,6 +1168,10 @@ async function loadToken(){
 }
 const authHeaders=x=>token?{...x,Authorization:'Bearer '+token}:x;
 async function api(route,method='GET',body=null){
+  // Without a token every call would be a guaranteed 401 — a request storm that once
+  // wrote 12,000 AUTH_FAILED lines in a day. Answer locally and let the pairing banner
+  // explain it instead.
+  if(!token) return {status:0,data:{success:false,error:'not paired with the daemon yet'}};
   const r=await fetch(DAEMON+route,{method,headers:authHeaders({'Content-Type':'application/json'}),body:body?JSON.stringify(body):undefined});
   const data=await r.json().catch(()=>({}));
   return {status:r.status,data};
