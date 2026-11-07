@@ -21,12 +21,12 @@ const unauth = guard.createThrottle();
 // A shell that polls without a token used to write one log line per request: 12,239
 // of them in a day. Keep the signal, drop the flood.
 const authFailLog = new Map();
-function logAuthFailure(endpoint, ip) {
+function logAuthFailure(endpoint, ip, ua) {
   const key = endpoint + '|' + ip;
   const now = Date.now();
   const prev = authFailLog.get(key) || { at: 0, count: 0 };
   if (now - prev.at > 60000) {
-    logger.warn('SYSTEM', 'AUTH_FAILED', { endpoint, ip, suppressed_since_last: prev.count });
+    logger.warn('SYSTEM', 'AUTH_FAILED', { endpoint, ip, ua: String(ua || '').slice(0, 60), suppressed_since_last: prev.count });
     authFailLog.set(key, { at: now, count: 0 });
   } else {
     prev.count += 1;
@@ -434,7 +434,7 @@ class LiberDaemon {
         success: false,
         error: 'Unauthorized. Send Authorization: Bearer <token>. The desktop token lives in .liber/daemon.token; other clients get their own from /clients (scope admin).'
       }));
-      logAuthFailure(endpoint, req.socket.remoteAddress);
+      logAuthFailure(endpoint, req.socket.remoteAddress, req.headers['user-agent']);
       auth.audit({ client: null, ip: req.socket.remoteAddress, method: req.method, endpoint, decision: 'deny', reason: 'bad token' });
       return;
     }

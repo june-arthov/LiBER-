@@ -1148,6 +1148,7 @@ async function loadTokenOnce(){
     if(r.ok){
       const j=await r.json();
       tokenPath=j.token_path||null;
+      if(tokenPath) TOKEN_PATH = tokenPath;
       cwd=j.cwd||'';
       // The badge used to be a hardcoded 'v0.5' that survived four releases.
       const badge=$('brand-ver');
@@ -1167,11 +1168,23 @@ async function loadTokenOnce(){
   }
 }
 const authHeaders=x=>token?{...x,Authorization:'Bearer '+token}:x;
+let tokenRepairAt = 0;
+let TOKEN_PATH = '';
+async function repairToken(){
+  if(!window.Neutralino) return;
+  try{ const fresh = String(await Neutralino.filesystem.readFile(TOKEN_PATH || '')||'').trim(); if(fresh) token = fresh; }catch{}
+}
 async function api(route,method='GET',body=null){
   // Without a token every call would be a guaranteed 401 — a request storm that once
   // wrote 12,000 AUTH_FAILED lines in a day. Answer locally and let the pairing banner
   // explain it instead.
   if(!token) return {status:0,data:{success:false,error:'not paired with the daemon yet'}};
+  // A rotated token makes every call 401 even though the window holds a value. Re-read
+  // the file once before giving up, so a rotation does not silently un-pair the app.
+  if(!tokenRepairAt || Date.now()-tokenRepairAt > 10000){
+    tokenRepairAt = Date.now();
+    await repairToken().catch(()=>{});
+  }
   const r=await fetch(DAEMON+route,{method,headers:authHeaders({'Content-Type':'application/json'}),body:body?JSON.stringify(body):undefined});
   const data=await r.json().catch(()=>({}));
   return {status:r.status,data};
