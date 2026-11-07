@@ -979,6 +979,13 @@ class LiberDaemon {
         }));
         return;
       }
+      else if (endpoint === '/media') {
+        // What this machine can actually do today: which provider answered, and
+        // whether ffmpeg exists for video post-processing. No capability is claimed
+        // without a key behind it.
+        const media = require('./core/tools/media-tool');
+        res.end(JSON.stringify({ success: true, ...media.policy() }));
+      }
       else if (endpoint === '/voice' || endpoint === '/voice/speak') {
         if (endpoint === '/voice' && req.method === 'GET') {
           const voices = await voice.voices();

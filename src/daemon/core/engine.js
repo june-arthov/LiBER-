@@ -418,6 +418,8 @@ class LiberEngine {
     const memKey = memoryKey || agentId;
     const cfg = { ...DEFAULT_GROUNDING, ...(agentConfig.grounding || {}) };
     const ledger = resumed ? EvidenceLedger.fromJSON(resumeState.ledger) : new EvidenceLedger(agentId);
+    // One id per turn, so a terminal line can be tied to the turn that caused it.
+    const turnId = `${agentId}:${Date.now().toString(36)}`;
     const skillCtx = skills.buildContext(String(userMessage || ''), cfg.doctrine_budget_chars);
     // Standing facts are injected every turn, not fetched on demand: a new
     // session should open already knowing the user and this workspace.
@@ -867,7 +869,7 @@ class LiberEngine {
             seq: ++subSeq
           });
         } else {
-          result = await registry.execute(call.name, call.args, { agentId, client: client || null, turnId: ledger.turnId || null });
+          result = await registry.execute(call.name, call.args, { agentId, client: client || null, turnId });
         }
 
         // A tool can refuse for policy reasons and report that a human may
@@ -881,7 +883,7 @@ class LiberEngine {
           const approved = await waitForHitl(agentId, call.name, call.args);
           if (approved) {
             onEvent('hitl_approved', { tool: call.name, retried: true });
-            result = await registry.execute(call.name, call.args, { approved: true, agentId, client: client || null, turnId: ledger.turnId || null });
+            result = await registry.execute(call.name, call.args, { approved: true, agentId, client: client || null, turnId });
           } else {
             result = { error: `DENIED: approval was not granted. Tool '${call.name}' did not execute.`, policy_denied: true };
           }

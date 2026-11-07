@@ -421,6 +421,34 @@ The only thing it unlocks is `GET /shared/<id>`, once per request, while
 
 ---
 
+## 🖼️ Images and video
+
+Two tools turn text into media. Neither model runs on your machine: the call goes
+to the provider whose key you configured, and LiBER keeps the part that matters —
+the file is written into the workspace, its path and size come back as a receipt, so
+a turn cannot claim "the image is ready" without a file behind it.
+
+| tool | provider | key |
+|---|---|---|
+| `image_generate` | OpenAI Images (or any endpoint that speaks `POST {base}/images/generations`) | `OPENAI_API_KEY` |
+| `video_generate` | Replicate (`/v1/predictions`, polled to completion) | `REPLICATE_API_TOKEN` |
+
+Results land in `artifacts/media/<timestamp>-<slug>.png|mp4`. Video asks for a model
+version (`LIBER_VIDEO_MODEL=owner/model:version`, or the `model` argument), and when
+`ffmpeg` is available it also extracts a thumbnail; when it is not, the reply says so
+instead of pretending.
+
+**Cost is capped before the call, not after.** `LIBER_MEDIA_MAX_USD` (default `$2`)
+refuses a single call above the ceiling, `LIBER_MEDIA_DAILY_USD` adds a daily media
+budget, and every successful call is recorded in `.liber/budget.json` so
+`limits.max_cost_per_day` covers media alongside tokens.
+
+`GET /media` reports what this machine can actually do right now — which provider is
+configured, whether ffmpeg was found — and **Settings → Images & Video** shows the
+same, plus a prompt box to try it.
+
+---
+
 ## 🔑 Clients and tokens
 
 Each client gets its own token, scopes (`read`, `chat`, `tools`, `admin`) and a

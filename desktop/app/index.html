@@ -2905,6 +2905,7 @@ const NAV2=[
   {id:'vault',label:'Vault & Secrets',icon:'⚿'},
   {id:'memory',label:'Memory & Context',icon:'◇'},
   {id:'voice',label:'Voice',icon:'◍'},
+  {id:'media',label:'Images & Video',icon:'▧'},
   {id:'advanced',label:'Advanced',icon:'⚙'},
   {id:'notifications',label:'Notifications',icon:'◔'},
   {id:'billing',label:'Billing',icon:'▤'},
@@ -3619,6 +3620,33 @@ async function renderPanel(){
       ex.style.display='';
     };
     await paint();
+    return;
+  }
+
+  /* ── IMAGES & VIDEO ────────────────────── */
+  if(cat==='media'){
+    const r=await api('/media').catch(()=>null);
+    const m=(r&&r.data)||{};
+    const img=(m.images||{}),vid=(m.video||{}),ff=m.ffmpeg;
+    p.innerHTML=`<h3>Images &amp; Video</h3>
+      <div class="pd">The agent can call <code>image_generate</code> and <code>video_generate</code>. Nothing runs on this machine: every result comes from the provider whose key is configured below, is written to <code>artifacts/media/</code> in the workspace, and is returned as a citable path.</div>
+      <table class="tbl"><tbody>
+        <tr><td style="width:170px">Images</td><td>${img.configured?`<span style="color:var(--green)">ready</span> · ${esc(img.provider)} · ${esc(img.model||'')}`:'<span style="color:var(--amber)">no provider</span> · add an OpenAI key in Providers, or any endpoint that speaks /images/generations'}</td></tr>
+        <tr><td>Video</td><td>${vid.configured?`<span style="color:var(--green)">ready</span> · ${esc(vid.provider)}`:'<span style="color:var(--amber)">no provider</span> · add a Replicate token in Providers'}</td></tr>
+        <tr><td>ffmpeg</td><td>${ff?esc(ff):'<span style="color:var(--dim)">not installed — video still saves, but no thumbnail is extracted</span>'}</td></tr>
+        <tr><td>Cost ceiling</td><td>$${Number(m.max_usd_per_call||0).toFixed(2)} per call · spend lands in the daily budget</td></tr>
+      </tbody></table>
+      <div class="dsec">Test an image</div>
+      <div class="f"><label>Prompt</label><div class="c"><input type="text" id="md-prompt" placeholder="a brass orrery on a dark table" style="width:100%"></div></div>
+      <div class="brow" style="gap:6px;flex-wrap:wrap"><button class="btn primary" id="md-run">Generate</button><span class="pd" id="md-out" style="margin:0"></span></div>`;
+    p.querySelector('#md-run').onclick=async()=>{
+      const prompt=p.querySelector('#md-prompt').value.trim();
+      if(!prompt){toast('a prompt is needed');return;}
+      p.querySelector('#md-out').textContent='asking the provider…';
+      const res=await api('/chat','POST',{agentId:'dev-bot',message:`Call image_generate with prompt ${JSON.stringify(prompt)} and then tell me the file path it returned.`});
+      const text=(res&&res.data&&res.data.response)||'';
+      p.querySelector('#md-out').textContent=text.slice(0,400)||'no answer';
+    };
     return;
   }
 

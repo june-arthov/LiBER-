@@ -51,6 +51,8 @@ function envValue(name) {
 const CATALOG = [
   // — OpenAI-compatible cloud APIs
   { id: 'openai', label: 'OpenAI', adapter: 'openai', base: 'https://api.openai.com/v1', env: 'OPENAI_API_KEY', docs: 'platform.openai.com/api-keys', kind: 'api' },
+  { id: 'replicate', label: 'Replicate', adapter: 'openai', base: 'https://api.replicate.com/v1', env: 'REPLICATE_API_TOKEN', docs: 'replicate.com/account/api-tokens', kind: 'api' },
+  { id: 'stability', label: 'Stability AI', adapter: 'openai', base: 'https://api.stability.ai', env: 'STABILITY_API_KEY', docs: 'platform.stability.ai', kind: 'api' },
   { id: 'anthropic', label: 'Anthropic', adapter: 'anthropic', base: 'https://api.anthropic.com', env: 'ANTHROPIC_API_KEY', docs: 'console.anthropic.com', kind: 'api' },
   { id: 'google', label: 'Google Gemini', adapter: 'gemini', base: 'https://generativelanguage.googleapis.com', env: 'GEMINI_API_KEY', docs: 'aistudio.google.com/apikey', kind: 'api' },
   { id: 'xai', label: 'xAI Grok', adapter: 'openai', base: 'https://api.x.ai/v1', env: 'XAI_API_KEY', docs: 'console.x.ai', kind: 'api' },

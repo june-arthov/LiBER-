@@ -263,10 +263,51 @@ class ToolRegistry {
       },
       handler: searchWeb
     });
+
+    // images and video are opt-in by key: the tool explains itself when missing
+    this.registerMedia();
   }
 
   register(def) {
     this.tools.set(def.name, def);
+  }
+
+  /** Text to image/video: provider-backed, written into the workspace, spent from
+   *  the same daily budget. Registered apart because it is opt-in by key. */
+  registerMedia() {
+    const media = require('./tools/media-tool');
+
+    this.register({
+      name: 'image_generate',
+      description: 'Generate an image from a text prompt and save it into the workspace under artifacts/media/. Requires an image provider key (OpenAI by default, or any endpoint that speaks POST /images/generations). Returns the file path and size so the result can be cited.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'What the image should show' },
+          size: { type: 'string', description: 'e.g. 1024x1024, 1536x1024, 1024x1536' },
+          model: { type: 'string', description: 'Provider model id (default gpt-image-1)' },
+          endpoint: { type: 'string', description: 'Override the provider base URL' },
+          n: { type: 'integer', description: 'How many images (1-4)' }
+        },
+        required: ['prompt']
+      },
+      handler: media.imageGenerate
+    });
+
+    this.register({
+      name: 'video_generate',
+      description: 'Generate a short video from a text prompt through Replicate, save the mp4 under artifacts/media/, and extract a thumbnail when ffmpeg is available. Requires REPLICATE_API_TOKEN and a model version (LIBER_VIDEO_MODEL or the model argument).',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'What the video should show' },
+          model: { type: 'string', description: 'owner/model:version (falls back to LIBER_VIDEO_MODEL)' },
+          seconds: { type: 'integer', description: 'Clip length in seconds if the model supports it' }
+        },
+        required: ['prompt']
+      },
+      handler: media.videoGenerate
+    });
   }
 
   get(name) {

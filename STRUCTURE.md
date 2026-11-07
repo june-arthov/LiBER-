@@ -69,7 +69,7 @@ Events a shell must render (30 total): `start`, `draft_start/draft/draft_end`,
 | Daemon | `src/daemon/liberd.js` | 1,346 | HTTP/SSE, auth, 51 routes, timers |
 | Engine | `src/daemon/core/engine.js` | 1,029 | turn loop, gate wiring, subagents |
 | Grounding | `grounding.js` 420 · `evidence.js` 306 · `verifier.js` 4.3 KB · `injection.js` | ~800 | audit, receipts, second pass |
-| Tools | `core/tools/*` + `registry.js` (356) | ~1,700 | 12 tools + `task`/`tasks` |
+| Tools | `core/tools/*` + `registry.js` (356) | ~2,200 | 12 tools + `task`/`tasks` + `image_generate`, `video_generate` |
 | Providers | `core/providers.js` 540 · `llm/manager.js` + 4 adapters | ~900 | catalog, keys, adapters |
 | State | `memory.js`, `journal.js`, `trace.js`, `session`, `budget.js` | ~600 | context, resume, audit, spend |
 | Safety | `policy.js`, `terminal-tool.js` (488), `auth.js` (~240), `vault.js`, `stops.js` | ~1,200 | scope, sandbox, tokens, secrets, kill switch |
@@ -98,6 +98,8 @@ a layout only has to call them. Groups:
 - **Work**: `GET /ps`, `GET /turns`, `DELETE /turns?agentId=`, `GET /workspace`,
   `POST /workspace/switch`, `POST /git`, `POST /git/fetch`, `POST /git/checkout`,
   `POST /revert`
+- **Media**: `GET /media` (what this machine can actually do: provider, ffmpeg), tools
+  `image_generate` / `video_generate` writing to `artifacts/media/`
 - **Extras**: `/automations*`, `/connectors*`, `/voice`, `/voice/speak`,
   `/skills`, `/memory`, `/budget`, `/budget/limit`
 - **Meta**: `GET /healthz`, `GET /whoami`, `POST /shutdown`
@@ -151,6 +153,8 @@ appearance, memory, skills, sessions, shortcuts, about.
 
 ## Adding capability (server side)
 
+- **Media**: `tools/media-tool.js` is provider-backed and refuses to claim a capability
+  without a key; extend `policy()` when you add a provider, never the reply text.
 - **Tool**: write `src/daemon/core/tools/<name>-tool.js`, register it in
   `registry.js` with `{name, description, parameters, handler}` — the schema is
   validated by `core/validate.js`, so a bad argument never reaches the handler.

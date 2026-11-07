@@ -138,8 +138,24 @@ function record(usage, engineConfig = {}) {
   return s;
 }
 
+/**
+ * Media calls are priced per call, not per token. They land in the same daily cost
+ * counter so limits.max_cost_per_day covers them too.
+ */
+function recordSpend(costUsd, label = 'media') {
+  const amount = Number(costUsd);
+  if (!Number.isFinite(amount) || amount <= 0) return load();
+  const s = load();
+  s.cost_usd += amount;
+  s.calls += 1;
+  s.by_kind = { ...(s.by_kind || {}) };
+  s.by_kind[label] = Number(s.by_kind[label] || 0) + amount;
+  save();
+  return s;
+}
+
 function snapshot() {
   return { ...load() };
 }
 
-module.exports = { check, summary, record, reset, reload, snapshot, costOf, priceOf, today };
+module.exports = { check, summary, record, recordSpend, reset, reload, snapshot, costOf, priceOf, today };
