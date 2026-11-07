@@ -27,9 +27,16 @@ test('a revoked link stops resolving', () => {
 });
 
 test('an expired link stops resolving even though it is still on disk', () => {
-  const rec = shares.create({ key: 'dev-bot#expiring', ttlHours: 1 / 3600000 }); // 1 ms
-  const raw = JSON.parse(fs.readFileSync(process.env.LIBER_SHARES_FILE, 'utf8'));
-  assert.ok(raw.shares[rec.id], 'recorded before expiry');
+  const rec = shares.create({ key: 'dev-bot#expiring', ttlHours: 1 });
+  const store = JSON.parse(fs.readFileSync(process.env.LIBER_SHARES_FILE, 'utf8'));
+  assert.ok(store.shares[rec.id], 'recorded');
+
+  // Move the expiry into the past by writing it, not by sleeping: a millisecond TTL
+  // made this test depend on the clock advancing between two calls, which passed on
+  // Windows and failed on a fast Linux runner.
+  store.shares[rec.id].expires_at = new Date(Date.now() - 1000).toISOString();
+  fs.writeFileSync(process.env.LIBER_SHARES_FILE, JSON.stringify(store, null, 2), 'utf8');
+
   assert.strictEqual(shares.resolve(rec.id), null, 'expiry is checked at read time');
 });
 
